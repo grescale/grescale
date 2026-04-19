@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grescale - Login</title>
+    <script src="https://unpkg.com/htmx.org@1.9.11"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => lucide.createIcons());
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              border: "hsl(var(--border))",
+              input: "hsl(var(--input))",
+              ring: "hsl(var(--ring))",
+              background: "hsl(var(--background))",
+              foreground: "hsl(var(--foreground))",
+              primary: {
+                DEFAULT: "hsl(var(--primary))",
+                foreground: "hsl(var(--primary-foreground))",
+              },
+              muted: {
+                DEFAULT: "hsl(var(--muted))",
+                foreground: "hsl(var(--muted-foreground))",
+              },
+              card: {
+                DEFAULT: "hsl(var(--card))",
+                foreground: "hsl(var(--card-foreground))",
+              },
+            },
+            borderRadius: {
+              lg: "0.5rem",
+              md: "calc(0.5rem - 2px)",
+              sm: "calc(0.5rem - 4px)",
+            },
+            fontFamily: { sans: ["Inter", "sans-serif"] },
+          },
+        },
+      };
+    </script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+      :root {
+        --background: 0 0% 100%;
+        --foreground: 240 10% 3.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 240 10% 3.9%;
+        --primary: 240 5.9% 10%;
+        --primary-foreground: 0 0% 98%;
+        --muted: 240 4.8% 95.9%;
+        --muted-foreground: 240 3.8% 46.1%;
+        --border: 240 5.9% 90%;
+        --input: 240 5.9% 90%;
+        --ring: 240 10% 3.9%;
+      }
+      body {
+        background-color: hsl(var(--background));
+        color: hsl(var(--foreground));
+        font-family: "Inter", sans-serif;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-[linear-gradient(180deg,hsl(var(--background))_0%,hsl(var(--muted))_100%)] h-screen flex flex-col items-center justify-center font-sans antialiased text-foreground px-4"
+  >
+    <div class="w-full max-w-md mx-auto space-y-6">
+      <div class="text-center">
+        <h1 class="text-3xl font-semibold tracking-tight mb-2">Grescale</h1>
+        <p class="text-sm text-muted-foreground">Admin access</p>
+      </div>
+
+      <div
+        class="rounded-2xl border border-border bg-card text-card-foreground shadow-sm p-8"
+      >
+        <form
+          hx-post="/internal/api/auth/login"
+          hx-target="#login-error"
+          class="space-y-4"
+        >
+          <div class="space-y-2">
+            <label class="text-sm font-medium leading-none text-foreground/80"
+              >Email</label
+            >
+            <input
+              type="email"
+              name="email"
+              value="admin@grescale.local"
+              required
+              class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+          <div class="space-y-2">
+            <label class="text-sm font-medium leading-none text-foreground/80"
+              >Password</label
+            >
+            <input
+              type="password"
+              name="password"
+              required
+              class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+          <div id="login-error"></div>
+          <button
+            type="submit"
+            class="w-full inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground shadow hover:bg-primary/90 h-10 px-4 py-2 mt-4"
+          >
+            <i data-lucide="log-in" class="w-4 h-4 mr-2"></i> Log in
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Global Async Request Loader -->
+    <div
+      id="global-loader"
+      class="fixed inset-0 z-[9999] bg-background/80 flex flex-col items-center justify-center backdrop-blur-sm transition-opacity duration-200"
+      style="opacity: 0; pointer-events: none"
+    >
+      <div
+        class="animate-spin rounded-full h-12 w-12 border-b-2 border-foreground border-t-transparent mx-auto"
+      ></div>
+      <div class="mt-4 text-sm font-medium text-foreground">Processing...</div>
+    </div>
+    <script>
+      document.body.addEventListener("htmx:send", function () {
+        const loader = document.getElementById("global-loader");
+        if (loader) {
+          loader.style.opacity = "1";
+          loader.style.pointerEvents = "auto";
+        }
+      });
+      document.body.addEventListener("htmx:afterRequest", function () {
+        const loader = document.getElementById("global-loader");
+        if (loader) {
+          loader.style.opacity = "0";
+          loader.style.pointerEvents = "none";
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "name": "grescale",
+  "version": "1.0.0",
+  "description": "A PocketBase alternative built with Bun, HTMX, and Postgres",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "db:init": "bun run src/db/init.ts",
+    "test": "bun test",
+    "test:ui": "playwright test",
+    "test:ui:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "handlebars": "^4.7.8",
+    "hono": "^4.2.0",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/bun": "latest",
+    "@types/node": "^22.15.17"
+  }
+}

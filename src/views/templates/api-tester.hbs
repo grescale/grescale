@@ -1,0 +1,114 @@
+<div class="p-6 lg:p-8">
+  <div class="mb-6 max-w-2xl">
+    <p
+      class="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground"
+    >Tools</p>
+    <h2 class="mt-2 text-2xl font-semibold tracking-tight text-foreground">API
+      Tester</h2>
+    <p class="mt-2 text-sm text-muted-foreground">Test API endpoints directly
+      from the admin panel.</p>
+  </div>
+
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+    <!-- Request Builder -->
+    <div class="lg:col-span-2 space-y-4">
+      <div class="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <h3
+          class="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+        >Build Request</h3>
+
+        <div class="mt-4 space-y-4">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label
+                class="mb-1 block text-sm font-medium text-foreground/80"
+              >Method</label>
+              <select
+                id="api-method"
+                class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              >
+                <option>GET</option>
+                <option>POST</option>
+                <option>PUT</option>
+                <option>DELETE</option>
+                <option>PATCH</option>
+              </select>
+            </div>
+            <div class="col-span-2">
+              <label
+                class="mb-1 block text-sm font-medium text-foreground/80"
+              >Endpoint</label>
+              <input
+                type="text"
+                id="api-endpoint"
+                placeholder="/api/collections/posts/records"
+                class="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label
+              class="mb-1 block text-sm font-medium text-foreground/80"
+            >Headers</label>
+            <textarea
+              id="api-headers"
+              placeholder='{"Authorization": "Bearer token"}'
+              rows="3"
+              class="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+            ></textarea>
+          </div>
+
+          <div>
+            <label
+              class="mb-1 block text-sm font-medium text-foreground/80"
+            >Body</label>
+            <textarea
+              id="api-body"
+              placeholder='{"name": "value"}'
+              rows="4"
+              class="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+            ></textarea>
+          </div>
+
+          <button
+            onclick="window.sendApiRequest()"
+            class="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >Send Request</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Response -->
+    <div class="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <h3
+        class="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+      >Response</h3>
+      <div
+        id="api-response"
+        class="mt-4 max-h-96 overflow-y-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-sm text-foreground"
+      >
+        <p class="text-muted-foreground">Response will appear here</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  window.sendApiRequest = async function() { const method =
+  document.getElementById('api-method').value; const endpoint =
+  document.getElementById('api-endpoint').value; const headersText =
+  document.getElementById('api-headers').value; const bodyText =
+  document.getElementById('api-body').value; const responseDiv =
+  document.getElementById('api-response'); try { const headers =
+  headersText.trim() ? JSON.parse(headersText) : {}; const body =
+  bodyText.trim() ? JSON.parse(bodyText) : undefined; const options = { method,
+  headers }; if (body) options.body = JSON.stringify(body); const response =
+  await fetch(endpoint, options); const contentType =
+  response.headers.get('content-type'); let responseBody = ''; if (contentType
+  && contentType.includes('application/json')) { responseBody =
+  JSON.stringify(await response.json(), null, 2); } else { responseBody = await
+  response.text(); } responseDiv.innerHTML = `<pre
+  class="text-foreground">${responseBody}</pre>`; } catch (err) {
+  responseDiv.innerHTML = `<pre class="text-red-500">${err.message}</pre>`; } };
+</script>

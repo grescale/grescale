@@ -1,0 +1,49 @@
+<div class="p-6 lg:p-8">
+  <div class="mb-6 max-w-2xl">
+    <p
+      class="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground"
+    >Tools</p>
+    <h2 class="mt-2 text-2xl font-semibold tracking-tight text-foreground">SQL
+      Explorer</h2>
+    <p class="mt-2 text-sm text-muted-foreground">Execute read-only SQL queries.</p>
+  </div>
+
+  <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <!-- Query Editor -->
+    <div class="space-y-4">
+      <form
+        hx-post="{{baseUrl}}/sql-explorer"
+        hx-target="#sql-results"
+        class="space-y-4"
+      >
+        <div>
+          <label class="mb-1 block text-sm font-medium text-foreground/80">SQL
+            Query</label>
+          <textarea
+            name="query"
+            placeholder="SELECT * FROM _collections;"
+            rows="12"
+            class="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
+          ></textarea>
+        </div>
+        <button
+          type="submit"
+          class="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >Execute Query</button>
+      </form>
+    </div>
+
+    <!-- Results -->
+    <div class="space-y-4">
+      <div
+        id="sql-results"
+        class="rounded-xl border border-border bg-card p-5 shadow-sm"
+      >
+        <h3
+          class="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground"
+        >Results</h3>
+        <p class="mt-4 text-sm text-muted-foreground">Results will appear here</p>
+      </div>
+    </div>
+  </div>
+</div>

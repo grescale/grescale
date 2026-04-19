@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grescale - Initial Setup</title>
+    <script src="https://unpkg.com/htmx.org@1.9.11"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => lucide.createIcons());
+    </script>
+  </head>
+  <body
+    class="bg-[linear-gradient(180deg,hsl(var(--background))_0%,hsl(var(--muted))_100%)] h-screen flex flex-col items-center justify-center font-sans text-foreground px-4"
+  >
+    <div
+      class="w-full max-w-md rounded-2xl border border-border bg-card shadow-sm p-8 space-y-6"
+    >
+      <div class="text-center">
+        <h1 class="text-3xl font-semibold tracking-tight mb-2">Welcome</h1>
+        <p class="text-sm text-muted-foreground">
+          Create the first admin account.
+        </p>
+      </div>
+
+      <div id="setup-error" class="empty:hidden"></div>
+
+      <form
+        hx-post="/internal/api/auth/setup"
+        hx-target="#setup-error"
+        hx-swap="innerHTML"
+        class="space-y-4"
+      >
+        <div>
+          <label class="block text-sm font-medium mb-1 text-foreground/80"
+            >Admin Email</label
+          >
+          <input
+            type="email"
+            name="email"
+            required
+            class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1 text-foreground/80"
+            >Admin Password (min. 8 chars)</label
+          >
+          <input
+            type="password"
+            name="password"
+            minlength="8"
+            required
+            class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
+        <button
+          type="submit"
+          class="w-full inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground font-medium h-10 px-4 hover:bg-primary/90 transition-colors"
+        >
+          Create Admin
+        </button>
+      </form>
+
+      <script>
+        document.body.addEventListener("htmx:afterRequest", function (evt) {
+          if (evt.detail.successful && evt.detail.xhr.status === 200) {
+            const res = JSON.parse(evt.detail.xhr.response);
+            if (res.success) {
+              document.getElementById("setup-error").innerHTML =
+                '<div class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-center text-emerald-700">Admin created. Redirecting to login...</div>';
+              setTimeout(() => (window.location.href = "/login"), 1500);
+            }
+          }
+        });
+      </script>
+    </div>
+
+    <!-- Global Async Request Loader -->
+    <div
+      id="global-loader"
+      class="fixed inset-0 z-[9999] bg-background/80 flex flex-col items-center justify-center backdrop-blur-sm transition-opacity duration-200"
+      style="opacity: 0; pointer-events: none"
+    >
+      <div
+        class="animate-spin rounded-full h-12 w-12 border-b-2 border-foreground border-t-transparent mx-auto"
+      ></div>
+      <div class="mt-4 text-sm font-medium text-foreground">Processing...</div>
+    </div>
+    <script>
+      document.body.addEventListener("htmx:send", function () {
+        const loader = document.getElementById("global-loader");
+        if (loader) {
+          loader.style.opacity = "1";
+          loader.style.pointerEvents = "auto";
+        }
+      });
+      document.body.addEventListener("htmx:afterRequest", function () {
+        const loader = document.getElementById("global-loader");
+        if (loader) {
+          loader.style.opacity = "0";
+          loader.style.pointerEvents = "none";
+        }
+      });
+    </script>
+  </body>
+</html>

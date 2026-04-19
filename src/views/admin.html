@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grescale - Admin UI</title>
+    <script src="https://unpkg.com/htmx.org@1.9.11"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        lucide.createIcons();
+      });
+      document.addEventListener("htmx:afterSwap", function () {
+        lucide.createIcons();
+      });
+    </script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              border: "hsl(var(--border))",
+              input: "hsl(var(--input))",
+              ring: "hsl(var(--ring))",
+              background: "hsl(var(--background))",
+              foreground: "hsl(var(--foreground))",
+              primary: {
+                DEFAULT: "hsl(var(--primary))",
+                foreground: "hsl(var(--primary-foreground))",
+              },
+              secondary: {
+                DEFAULT: "hsl(var(--secondary))",
+                foreground: "hsl(var(--secondary-foreground))",
+              },
+              destructive: {
+                DEFAULT: "hsl(var(--destructive))",
+                foreground: "hsl(var(--destructive-foreground))",
+              },
+              muted: {
+                DEFAULT: "hsl(var(--muted))",
+                foreground: "hsl(var(--muted-foreground))",
+              },
+              accent: {
+                DEFAULT: "hsl(var(--accent))",
+                foreground: "hsl(var(--accent-foreground))",
+              },
+              popover: {
+                DEFAULT: "hsl(var(--popover))",
+                foreground: "hsl(var(--popover-foreground))",
+              },
+              card: {
+                DEFAULT: "hsl(var(--card))",
+                foreground: "hsl(var(--card-foreground))",
+              },
+            },
+            borderRadius: {
+              lg: "var(--radius)",
+              md: "calc(var(--radius) - 2px)",
+              sm: "calc(var(--radius) - 4px)",
+            },
+            fontFamily: {
+              sans: [
+                "Inter",
+                "ui-sans-serif",
+                "system-ui",
+                "-apple-system",
+                "BlinkMacSystemFont",
+                "Segoe UI",
+                "Roboto",
+                "Helvetica Neue",
+                "Arial",
+                "sans-serif",
+              ],
+            },
+          },
+        },
+      };
+    </script>
+
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+      :root {
+        --background: 0 0% 100%;
+        --foreground: 240 10% 3.9%;
+        --card: 0 0% 100%;
+        --card-foreground: 240 10% 3.9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 240 10% 3.9%;
+        --primary: 240 5.9% 10%;
+        --primary-foreground: 0 0% 98%;
+        --secondary: 240 4.8% 95.9%;
+        --secondary-foreground: 240 5.9% 10%;
+        --muted: 240 4.8% 95.9%;
+        --muted-foreground: 240 3.8% 46.1%;
+        --accent: 240 4.8% 95.9%;
+        --accent-foreground: 240 5.9% 10%;
+        --destructive: 0 84.2% 60.2%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 240 5.9% 90%;
+        --input: 240 5.9% 90%;
+        --ring: 240 10% 3.9%;
+        --radius: 0.5rem;
+      }
+
+      body {
+        background-color: hsl(var(--background));
+        color: hsl(var(--foreground));
+        font-family: "Inter", sans-serif;
+      }
+
+      .quick-link-btn {
+        width: 100%;
+        height: 2.5rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.5rem;
+        color: hsl(var(--muted-foreground));
+        background: transparent;
+        transition:
+          background-color 0.18s ease,
+          color 0.18s ease,
+          border-color 0.18s ease;
+      }
+
+      .quick-link-btn:hover {
+        background: hsl(var(--muted));
+        color: hsl(var(--foreground));
+      }
+
+      .quick-link-btn.active {
+        background: hsl(var(--muted));
+        color: hsl(var(--foreground));
+      }
+
+      /* HTMX Animations */
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @keyframes slideInRight {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes slideOutRight {
+        from {
+          transform: translateX(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+      }
+
+      @keyframes slideInUp {
+        from {
+          transform: translateY(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes fadeOut {
+        from {
+          opacity: 1;
+        }
+        to {
+          opacity: 0;
+        }
+      }
+
+      /* HTMX Swap Animations */
+      .htmx-swapping {
+        animation: fadeOut 0.15s ease-out;
+      }
+
+      .htmx-settling {
+        animation: fadeIn 0.2s ease-in;
+      }
+
+      /* Drawer Animation */
+      #drawer-container {
+        pointer-events: none;
+      }
+
+      #drawer-container [data-drawer-backdrop] {
+        pointer-events: auto;
+        animation: fadeIn 0.2s ease-out both;
+      }
+
+      #drawer-container [data-drawer-panel] {
+        pointer-events: auto;
+        animation: slideInRight 0.3s ease-out both;
+      }
+
+      #drawer-container.is-closing [data-drawer-backdrop] {
+        animation: fadeOut 0.2s ease-in both;
+      }
+
+      #drawer-container.is-closing [data-drawer-panel] {
+        animation: slideOutRight 0.25s ease-in both;
+      }
+
+      #drawer-container.htmx-swapping {
+        animation: fadeOut 0.15s ease-out;
+      }
+
+      /* Main Content Animation */
+      #main-content {
+        animation: fadeIn 0.25s ease-in;
+      }
+
+      /* Collection Item Animation */
+      [data-collection-item] {
+        animation: slideInUp 0.3s ease-out backwards;
+      }
+
+      [data-collection-item]:nth-child(1) {
+        animation-delay: 0.05s;
+      }
+      [data-collection-item]:nth-child(2) {
+        animation-delay: 0.1s;
+      }
+      [data-collection-item]:nth-child(3) {
+        animation-delay: 0.15s;
+      }
+      [data-collection-item]:nth-child(4) {
+        animation-delay: 0.2s;
+      }
+      [data-collection-item]:nth-child(5) {
+        animation-delay: 0.25s;
+      }
+      [data-collection-item]:nth-child(n + 6) {
+        animation-delay: 0.3s;
+      }
+
+      /* Toast Animation */
+      .toast-notification {
+        animation: slideInUp 0.3s ease-out;
+      }
+
+      /* Form Input Focus Animation */
+      input:focus,
+      textarea:focus,
+      select:focus {
+        animation: none;
+        transition: all 0.2s ease;
+      }
+
+      /* Loading State */
+      .htmx-request .htmx-indicator {
+        display: inline-block;
+      }
+
+      .htmx-request.htmx-indicator {
+        display: inline-block;
+      }
+
+      .htmx-indicator {
+        display: none;
+      }
+
+      /* Button Hover Smooth Transition */
+      button {
+        transition: all 0.2s ease;
+      }
+
+      button:hover {
+        transform: none;
+      }
+
+      /* Smooth Color Transitions */
+      * {
+        transition:
+          background-color 0.2s ease,
+          color 0.2s ease,
+          border-color 0.2s ease;
+      }
+
+      input,
+      textarea,
+      select {
+        transition:
+          background-color 0.15s ease,
+          border-color 0.15s ease;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-[linear-gradient(180deg,hsl(var(--background))_0%,hsl(var(--muted))_100%)] h-screen flex overflow-hidden font-sans text-foreground"
+  >
+    <aside
+      class="w-16 bg-background border-r border-border flex flex-col h-full"
+    >
+      <div class="h-16 border-b border-border flex items-center justify-center">
+        <div
+          class="w-9 h-9 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm"
+          title="Grescale"
+        >
+          G
+        </div>
+      </div>
+
+      <div class="p-2 flex-1 overflow-y-auto flex flex-col gap-1">
+        <button
+          data-quick-link
+          data-quick-group="collections"
+          title="Collections"
+          onclick="openCollectionsHome()"
+          class="quick-link-btn"
+        >
+          <i data-lucide="database" class="w-4 h-4"></i>
+        </button>
+
+        <button
+          data-quick-link
+          data-quick-group="superadmins"
+          title="Superadmins"
+          hx-get="/admin/collections/_users/records"
+          hx-target="#main-content"
+          hx-push-url="/collections/_users"
+          class="quick-link-btn"
+        >
+          <i data-lucide="shield" class="w-4 h-4"></i>
+        </button>
+
+        <button
+          data-quick-link
+          data-quick-group="settings"
+          title="Settings"
+          hx-get="/admin/collections/system-settings"
+          hx-target="#main-content"
+          hx-push-url="/settings"
+          class="quick-link-btn"
+        >
+          <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+
+        <button
+          data-quick-link
+          data-quick-group="logs"
+          title="Request Logs"
+          hx-get="/admin/collections/logs"
+          hx-target="#main-content"
+          hx-push-url="/logs"
+          class="quick-link-btn"
+        >
+          <i data-lucide="file-text" class="w-4 h-4"></i>
+        </button>
+
+        <button
+          data-quick-link
+          data-quick-group="api-tester"
+          title="API Tester"
+          hx-get="/admin/collections/api-tester"
+          hx-target="#main-content"
+          hx-push-url="/api-tester"
+          class="quick-link-btn"
+        >
+          <i data-lucide="flask-conical" class="w-4 h-4"></i>
+        </button>
+
+        <button
+          data-quick-link
+          data-quick-group="sql-explorer"
+          title="SQL Explorer"
+          hx-get="/admin/collections/sql-explorer"
+          hx-target="#main-content"
+          hx-push-url="/sql-explorer"
+          class="quick-link-btn"
+        >
+          <i data-lucide="table-properties" class="w-4 h-4"></i>
+        </button>
+
+        <button
+          data-quick-link
+          data-quick-group="custom-endpoints"
+          title="Custom Endpoints"
+          hx-get="/admin/custom-endpoints"
+          hx-target="#main-content"
+          hx-push-url="/custom-endpoints"
+          class="quick-link-btn"
+        >
+          <i data-lucide="code" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="p-2 border-t border-border">
+        <button
+          type="button"
+          title="Logout"
+          onclick="handleLogout()"
+          class="quick-link-btn w-full"
+        >
+          <i data-lucide="log-out" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </aside>
+
+    <aside
+      id="collections-panel"
+      class="w-64 bg-background border-r border-border flex flex-col h-full"
+    >
+      <div
+        class="px-4 pt-4 pb-2 border-border flex items-center justify-between"
+      >
+        <h2
+          class="text-xs uppercase text-muted-foreground font-bold tracking-widest"
+        >
+          Collections
+        </h2>
+        <button
+          hx-get="/admin/collections/new"
+          hx-target="#drawer-container"
+          class="text-muted-foreground hover:bg-muted hover:text-foreground w-9 h-9 rounded-md transition flex items-center justify-center border border-transparent hover:border-border"
+          title="New Collection"
+        >
+          <svg
+            class="w-4 h-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M12 4v16m8-8H4"
+            ></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="px-4 pb-4 pt-2 flex-1 overflow-y-auto">
+        <div class="mb-3">
+          <input
+            id="collections-search-input"
+            type="search"
+            name="search"
+            placeholder="Search collections..."
+            class="w-full flex h-8 rounded-md border border-border bg-background px-3 py-1 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            hx-get="/admin/collections"
+            hx-target="#collections-list"
+            hx-trigger="keyup changed delay:300ms, search"
+            hx-replace-url="false"
+            oninput="syncCollectionsSearchUrl(this.value)"
+          />
+        </div>
+
+        <div
+          id="collections-list"
+          hx-get="/admin/collections"
+          hx-trigger="load"
+          class="space-y-1"
+        >
+          <div
+            class="text-sm text-muted-foreground/70 p-2 inline-flex items-center gap-2 animate-pulse"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="w-4 h-4 animate-spin"
+              aria-hidden="true"
+            >
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+            <span>Loading collections...</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col h-full overflow-hidden bg-muted/40">
+      <div id="main-content" class="flex-1 p-8 overflow-y-auto">
+        <div
+          class="flex flex-col items-center justify-center h-full text-center text-muted-foreground/70"
+        >
+          <svg
+            class="w-14 h-14 mb-4 text-muted-foreground/25"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+            ></path>
+          </svg>
+          <p class="text-lg font-medium">No Collection Selected</p>
+          <p class="text-sm mt-1">
+            Choose a collection to manage its schema and records.
+          </p>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      document.body.addEventListener("htmx:responseError", function (event) {
+        if (event.detail.xhr.status === 401) {
+          document.getElementById("main-content").innerHTML = `
+          <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
+            <strong class="font-bold">Unauthorized!</strong>
+            <span class="block sm:inline"> You are not logged in. Please <a href="/" class="underline text-red-800">log in from the main page</a> first.</span>
+          </div>
+        `;
+        }
+      });
+    </script>
+
+    <div id="drawer-container"></div>
+
+    <div
+      id="global-loader"
+      class="fixed inset-0 z-[9999] bg-background/80 flex flex-col items-center justify-center backdrop-blur-sm transition-opacity duration-200"
+      style="opacity: 0; pointer-events: none"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        class="w-10 h-10 text-foreground animate-spin"
+        aria-hidden="true"
+      >
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+      </svg>
+      <div class="mt-4 text-sm font-medium text-foreground">Processing...</div>
+    </div>
+
+    <script>
+      function toggleCollectionsPanel(open) {
+        const panel = document.getElementById("collections-panel");
+        if (!panel) return;
+        panel.classList.toggle("hidden", !open);
+      }
+
+      window.closeDrawer = function () {
+        const drawerContainer = document.getElementById("drawer-container");
+        if (!drawerContainer || !drawerContainer.children.length) return;
+        if (drawerContainer.dataset.closing === "1") return;
+
+        drawerContainer.dataset.closing = "1";
+        drawerContainer.classList.add("is-closing");
+
+        window.setTimeout(() => {
+          drawerContainer.innerHTML = "";
+          drawerContainer.classList.remove("is-closing");
+          delete drawerContainer.dataset.closing;
+        }, 250);
+      };
+
+      function renderCollectionsHomePlaceholder() {
+        const main = document.getElementById("main-content");
+        if (!main) return;
+        main.innerHTML = `
+          <div class="flex flex-col items-center justify-center h-full text-center text-muted-foreground/70">
+            <svg
+              class="w-16 h-16 mb-4 text-gray-300"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+              ></path>
+            </svg>
+            <p class="text-lg font-medium">No Collection Selected</p>
+            <p class="text-sm mt-1">
+              Choose a collection to manage its schema and records.
+            </p>
+          </div>
+        `;
+      }
+
+      function getEndpointForPath(path, params) {
+        if (path === "/collections") {
+          return "";
+        }
+
+        if (path.startsWith("/collections/")) {
+          const collectionName = decodeURIComponent(
+            path.replace("/collections/", ""),
+          );
+          const page = params.get("page") || "1";
+          const filter = params.get("filter") || "";
+          const sort = params.get("sort") || "created_at";
+          const order = params.get("order") || "desc";
+          const queryParams = new URLSearchParams();
+          queryParams.set("page", page);
+          queryParams.set("sort", sort);
+          queryParams.set("order", order);
+          if (filter) queryParams.set("filter", filter);
+          return `/admin/collections/${encodeURIComponent(collectionName)}/records?${queryParams.toString()}`;
+        }
+
+        if (path === "/dashboard" || path === "/admin") {
+          return "/admin/collections";
+        }
+        if (path === "/settings") {
+          return "/admin/collections/system-settings";
+        }
+        if (path === "/logs") {
+          return "/admin/collections/logs";
+        }
+        if (path === "/api-tester") {
+          return "/admin/collections/api-tester";
+        }
+        if (path === "/sql-explorer") {
+          return "/admin/collections/sql-explorer";
+        }
+        if (path === "/custom-endpoints") {
+          const query = window.location.search || "";
+          return `/admin/custom-endpoints${query}`;
+        }
+
+        return "/admin/collections";
+      }
+
+      function syncCollectionFilterUrl(collectionName, filterValue) {
+        const trimmedFilter = (filterValue || "").trim();
+        const basePath = `/collections/${encodeURIComponent(collectionName)}`;
+        const currentParams = new URLSearchParams(window.location.search);
+        const nextParams = new URLSearchParams();
+
+        // Only keep route-control params; never persist arbitrary field state.
+        ["page", "sort", "order", "search"].forEach((key) => {
+          const value = currentParams.get(key);
+          if (value) nextParams.set(key, value);
+        });
+
+        if (trimmedFilter) {
+          nextParams.set("filter", trimmedFilter);
+        } else {
+          nextParams.delete("filter");
+        }
+
+        const nextUrl = nextParams.toString()
+          ? `${basePath}?${nextParams.toString()}`
+          : basePath;
+
+        if (
+          `${window.location.pathname}${window.location.search}` === nextUrl
+        ) {
+          return;
+        }
+
+        window.history.replaceState({}, "", nextUrl);
+        applyRouteState(false);
+      }
+
+      function syncCollectionsSearchUrl(searchValue) {
+        if (!window.location.pathname.startsWith("/collections")) return;
+
+        const trimmedSearch = (searchValue || "").trim();
+        const currentParams = new URLSearchParams(window.location.search);
+        const nextParams = new URLSearchParams();
+
+        // Only keep route-control params; never persist arbitrary field state.
+        ["page", "sort", "order", "filter", "recordId"].forEach((key) => {
+          const value = currentParams.get(key);
+          if (value) nextParams.set(key, value);
+        });
+
+        if (trimmedSearch) {
+          nextParams.set("search", trimmedSearch);
+        } else {
+          nextParams.delete("search");
+        }
+
+        const nextQuery = nextParams.toString();
+        const nextUrl = nextQuery
+          ? `${window.location.pathname}?${nextQuery}`
+          : window.location.pathname;
+        const currentUrl = `${window.location.pathname}${window.location.search}`;
+
+        if (currentUrl === nextUrl) return;
+
+        window.history.replaceState({}, "", nextUrl);
+      }
+
+      function restoreCollectionsSearchFromUrl() {
+        const input = document.getElementById("collections-search-input");
+        const list = document.getElementById("collections-list");
+        if (!input || !list) return;
+
+        const params = new URLSearchParams(window.location.search);
+        const search = params.get("search") || "";
+
+        if (input.value !== search) {
+          input.value = search;
+        }
+
+        if (!window.htmx) return;
+
+        const endpoint = search
+          ? `/admin/collections?search=${encodeURIComponent(search)}`
+          : "/admin/collections";
+        window.htmx.ajax("GET", endpoint, "#collections-list");
+      }
+
+      function applyRouteState(loadContent = false) {
+        const path = window.location.pathname;
+        const params = new URLSearchParams(window.location.search);
+        const endpoint = getEndpointForPath(path, params);
+
+        applyActiveQuickLink();
+        toggleCollectionsPanel(shouldShowCollectionsPanel(path));
+
+        if (!loadContent) return;
+        if (!endpoint) {
+          renderCollectionsHomePlaceholder();
+          return;
+        }
+        if (window.htmx) {
+          window.htmx.ajax("GET", endpoint, "#main-content");
+        }
+      }
+
+      function openCollectionsHome() {
+        if (window.location.pathname !== "/collections") {
+          window.history.pushState({}, "", "/collections");
+        }
+        applyRouteState(true);
+      }
+
+      function shouldShowCollectionsPanel(pathname) {
+        return (
+          pathname === "/collections" ||
+          (pathname.startsWith("/collections/") &&
+            pathname !== "/collections/_users")
+        );
+      }
+
+      function getActiveCollectionName(pathname) {
+        if (!pathname.startsWith("/collections/")) return "";
+        const encodedName = pathname.replace("/collections/", "").split("/")[0];
+        const decodedName = decodeURIComponent(encodedName || "");
+        if (!decodedName || decodedName === "_users") return "";
+        return decodedName;
+      }
+
+      function applyActiveCollectionItem() {
+        const activeCollection = getActiveCollectionName(
+          window.location.pathname,
+        );
+        const rows = document.querySelectorAll("[data-collection-item]");
+
+        rows.forEach((row) => {
+          const name = row.getAttribute("data-collection-name") || "";
+          const isActive = !!activeCollection && name === activeCollection;
+          row.classList.toggle("bg-accent", isActive);
+          row.classList.toggle("text-accent-foreground", isActive);
+        });
+      }
+
+      async function handleLogout() {
+        try {
+          await fetch("/internal/api/auth/logout", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "HX-Request": "true",
+            },
+          });
+        } finally {
+          window.location.replace("/login");
+        }
+      }
+
+      function getActiveGroup(pathname) {
+        if (pathname === "/collections/_users") return "superadmins";
+        if (pathname === "/collections") return "collections";
+        if (pathname.startsWith("/collections/")) return "collections";
+        if (pathname === "/dashboard" || pathname === "/admin")
+          return "collections";
+        if (pathname === "/settings") return "settings";
+        if (pathname === "/logs") return "logs";
+        if (pathname === "/api-tester") return "api-tester";
+        if (pathname === "/sql-explorer") return "sql-explorer";
+        if (pathname === "/custom-endpoints") return "custom-endpoints";
+        return "collections";
+      }
+
+      applyActiveCollectionItem();
+      function applyActiveQuickLink() {
+        const activeGroup = getActiveGroup(window.location.pathname);
+        const quickLinks = document.querySelectorAll("[data-quick-link]");
+        quickLinks.forEach((link) => {
+          const group = link.getAttribute("data-quick-group");
+          link.classList.toggle("active", group === activeGroup);
+        });
+      }
+
+      document.body.addEventListener("click", function (event) {
+        const quickLink = event.target.closest("[data-quick-link]");
+        if (!quickLink) return;
+        const group = quickLink.getAttribute("data-quick-group");
+        if (group !== "collections") {
+          toggleCollectionsPanel(false);
+        } else {
+          toggleCollectionsPanel(true);
+        }
+      });
+
+      document.body.addEventListener("htmx:send", function () {
+        const loader = document.getElementById("global-loader");
+        if (loader) {
+          loader.style.opacity = "1";
+          loader.style.pointerEvents = "auto";
+        }
+      });
+
+      document.body.addEventListener("htmx:afterRequest", function () {
+        const loader = document.getElementById("global-loader");
+        if (loader) {
+          loader.style.opacity = "0";
+          loader.style.pointerEvents = "none";
+        }
+      });
+
+      window.showToast = function (message, type = "success") {
+        const container = document.getElementById("toast-container");
+        if (!container) return;
+        const toast = document.createElement("div");
+        const toneClass =
+          type === "success"
+            ? "border-border text-foreground"
+            : "border-red-200 text-red-700";
+        toast.className = `transform transition-all duration-300 translate-y-4 opacity-0 bg-card border ${toneClass} px-4 py-3 rounded-lg shadow-sm flex items-center justify-between min-w-[250px]`;
+        toast.innerHTML = `
+          <span class="text-sm font-medium">${message}</span>
+          <button onclick="this.parentElement.remove()" class="ml-4 text-muted-foreground hover:text-foreground">&times;</button>
+        `;
+        container.appendChild(toast);
+
+        requestAnimationFrame(() => {
+          toast.classList.remove("translate-y-4", "opacity-0");
+        });
+
+        setTimeout(() => {
+          toast.classList.add("opacity-0", "translate-y-4");
+          setTimeout(() => toast.remove(), 300);
+        }, 3500);
+      };
+
+      window.copyCollectionId = async function (event, id) {
+        if (event) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(id);
+          } else {
+            const textarea = document.createElement("textarea");
+            textarea.value = id;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            const copied = document.execCommand("copy");
+            document.body.removeChild(textarea);
+            if (!copied) {
+              throw new Error("Clipboard copy failed");
+            }
+          }
+
+          window.showToast("Copied to clipboard", "success");
+        } catch (error) {
+          console.error("Failed to copy collection ID:", error);
+          window.showToast("Failed to copy to clipboard", "error");
+        }
+      };
+
+      document.body.addEventListener("show-toast", function (e) {
+        showToast(e.detail.message, e.detail.type);
+      });
+
+      document.body.addEventListener("htmx:afterSwap", function () {
+        applyActiveQuickLink();
+        applyActiveCollectionItem();
+      });
+
+      window.addEventListener("popstate", function () {
+        restoreCollectionsSearchFromUrl();
+        applyRouteState(true);
+      });
+
+      document.addEventListener("DOMContentLoaded", function () {
+        restoreCollectionsSearchFromUrl();
+        applyRouteState(true);
+      });
+    </script>
+
+    <div
+      id="toast-container"
+      class="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2"
+    ></div>
+  </body>
+</html>
