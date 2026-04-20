@@ -119,7 +119,7 @@ publicApi.post("/collections/:collection/auth-with-password", async (c) => {
 
 publicApi.use("/collections/:collection/records*", async (c, next) => {
   const authHeader = c.req.header("Authorization");
-  const cookieHeader = c.req.header("Cookie");
+  const routeCollection = c.req.param("collection");
   let user: any = null;
 
   try {
@@ -127,10 +127,26 @@ publicApi.use("/collections/:collection/records*", async (c, next) => {
 
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.slice(7);
-      user = await verify(token, finalSecret, "HS256");
+      const payload: any = await verify(token, finalSecret, "HS256");
+
+      // Enforce token boundary: auth_record tokens can only act on their
+      // own collection; admin tokens bypass this check.
+      if (payload?.type === "auth_record") {
+        if (
+          !payload.collection ||
+          !routeCollection ||
+          payload.collection !== routeCollection
+        ) {
+          user = null;
+        } else {
+          user = payload;
+        }
+      } else if (payload?.type === "admin") {
+        user = payload;
+      }
     }
   } catch {
-    // It's ok to have an invalid token, they just remain anonymous guests, they might still be able to hit public endpoints.
+    // Invalid token - treat as anonymous guest.
   }
 
   c.set("auth_user", user);

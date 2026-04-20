@@ -166,6 +166,63 @@ type CronHandler = {
   }) => any;
 };
 
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HttpError";
+    this.status = status;
+  }
+}
+
+class BadRequestError extends HttpError {
+  constructor(message = "Bad Request") {
+    super(400, message);
+    this.name = "BadRequestError";
+  }
+}
+
+class UnauthorizedError extends HttpError {
+  constructor(message = "Unauthorized") {
+    super(401, message);
+    this.name = "UnauthorizedError";
+  }
+}
+
+class ForbiddenError extends HttpError {
+  constructor(message = "Forbidden") {
+    super(403, message);
+    this.name = "ForbiddenError";
+  }
+}
+
+class NotFoundError extends HttpError {
+  constructor(message = "Not Found") {
+    super(404, message);
+    this.name = "NotFoundError";
+  }
+}
+
+class ConflictError extends HttpError {
+  constructor(message = "Conflict") {
+    super(409, message);
+    this.name = "ConflictError";
+  }
+}
+
+class InternalServerError extends HttpError {
+  constructor(message = "Internal Server Error") {
+    super(500, message);
+    this.name = "InternalServerError";
+  }
+}
+
+let endpointHandlers: EndpointHandler[] = [];
+let cronHandlers: CronHandler[] = [];
+let runtimeGeneration = 0;
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+let watcherStarted = false;
+
 const protectedRecordFields = new Set([
   "id",
   "created",

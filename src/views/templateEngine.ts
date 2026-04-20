@@ -56,12 +56,6 @@ async function getTemplate(templateName: string) {
   return compiled;
 }
 
-/**
- * Render a template with data
- * @param templateName - Template file name without extension
- * @param data - Data object to pass to template
- * @returns Rendered HTML string
- */
 export async function renderTemplate(
   templateName: string,
   data: Record<string, any> = {},
@@ -69,15 +63,3 @@ export async function renderTemplate(
   const template = await getTemplate(templateName);
   return template(data);
 }
-
-/**
- * Register a Handlebars helper
- */
-export function registerHelper(name: string, helper: Function) {
-  Handlebars.registerHelper(name, helper);
-}
-
-export default {
-  renderTemplate,
-  registerHelper,
-};

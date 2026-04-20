@@ -1,43 +1,61 @@
 import { Hono } from "hono";
+import { join } from "path";
+import { access } from "fs/promises";
 import sql from "../db/db.ts";
-import { countCustomEndpointFiles } from "../customScripts.ts";
 import { renderTemplate } from "../views/templateEngine.ts";
 import { assertReadOnlySqlQuery, buildSafeSqlFilter } from "../sqlSafety.ts";
+import { invalidateRateLimitCache } from "../middleware/rateLimit.ts";
 import {
   COMMON_TIMEZONES,
-  DEFAULT_APP_TIMEZONE,
-  DEFAULT_PG_BACKUP_SETTINGS,
   PG_BACKUP_DIR,
   PG_BACKUP_FREQUENCIES,
-  PG_BACKUP_INTERVAL_MS,
-  type PgBackupFrequency,
   type PgBackupSettings,
   applyPgBackupRetention,
   convertLocalDateTimeInTimeZoneToUtcIso,
-  ensureBackupDir,
-  ensurePgBackupSchedulerStarted,
   formatBytes,
   formatDateOnlyForInput,
   formatDateTimeForInput,
   getConfiguredTimeZone,
   getCollectionsBasePath,
-  getDatePartsInTimeZone,
   getPgBackupSettings,
-  isValidIanaTimeZone,
   listPgBackupFiles,
-  makePgBackupFilename,
   normalizePgBackupFrequency,
   normalizeRetainCount,
   quoteIdentifier,
   restorePgDumpBackup,
   runPgDumpBackupOnce,
-  runScheduledPgBackupIfDue,
   safeTimeZone,
   sanitizeBackupFilename,
   savePgBackupSettings,
 } from "../services/collectionsBackend.ts";
 
 export const collections = new Hono();
+
+const RESERVED_COLLECTION_PATH_SEGMENTS = new Set([
+  "new",
+  "new-record",
+  "settings",
+  "logs",
+  "import",
+  "export",
+  "search",
+  "system-settings",
+  "api-tester",
+  "sql-explorer",
+  "backup",
+]);
+
+collections.use("/:collection/*", async (c, next) => {
+  const name = c.req.param("collection");
+  if (
+    name &&
+    !RESERVED_COLLECTION_PATH_SEGMENTS.has(name) &&
+    !/^[a-zA-Z0-9_]+$/.test(name)
+  ) {
+    return c.text("Invalid collection name.", 400);
+  }
+  return next();
+});
 
 function htmxErrorResponse(message: string, status = 422) {
   return new Response(JSON.stringify({ error: message }), {
@@ -1518,6 +1536,16 @@ collections.get("/system-settings", async (c) => {
   const configuredTimeZone = await getConfiguredTimeZone();
   const pgBackupSettings = await getPgBackupSettings();
   const pgBackupFiles = await listPgBackupFiles();
+  let rateLimiting: {
+    enabled: boolean;
+    rules: Array<{
+      label: string;
+      pattern: string;
+      maxRequests: number;
+      intervalSeconds: number;
+      targetedUsers: "all" | "guest" | "auth";
+    }>;
+  } = { enabled: false, rules: [] };
   try {
     const res =
       await sql`SELECT value FROM _settings WHERE key = 'google_oauth' LIMIT 1`;
@@ -1526,6 +1554,22 @@ collections.get("/system-settings", async (c) => {
         typeof res[0].value === "string"
           ? JSON.parse(res[0].value)
           : res[0].value;
+    }
+  } catch (e) {}
+  try {
+    const res =
+      await sql`SELECT value FROM _settings WHERE key = 'rate_limiting' LIMIT 1`;
+    if (res.length > 0) {
+      const parsed =
+        typeof res[0].value === "string"
+          ? JSON.parse(res[0].value)
+          : res[0].value;
+      if (parsed && typeof parsed === "object") {
+        rateLimiting = {
+          enabled: !!parsed.enabled,
+          rules: Array.isArray(parsed.rules) ? parsed.rules : [],
+        };
+      }
     }
   } catch (e) {}
 
@@ -1683,6 +1727,40 @@ collections.get("/system-settings", async (c) => {
         <div id="pg-backup-settings-result" class="text-sm mt-2"></div>
       </div>
 
+      <div class="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">Rate limiting</h3>
+          <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${rateLimiting.enabled ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-muted text-muted-foreground border border-border"}">${rateLimiting.enabled ? "Enabled" : "Disabled"}</span>
+        </div>
+        <p class="mb-4 text-sm text-muted-foreground">Throttle requests per IP for selected paths. Patterns support <code>*</code> wildcards (e.g. <code>/api/collections/*/auth-with-password</code>).</p>
+
+        <form id="rate-limit-form" hx-post="${collectionsBase}/system-settings/rate-limiting" hx-target="#rate-limit-result" class="space-y-4">
+          <label class="flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
+            <input id="rate-limit-enabled" name="enabled" type="checkbox" value="true" ${rateLimiting.enabled ? "checked" : ""} class="h-4 w-4 rounded border-border text-primary focus:ring-primary">
+            <span>Enable rate limiting</span>
+          </label>
+
+          <input type="hidden" name="rules_json" id="rate-limit-rules-json" value="${JSON.stringify(rateLimiting.rules).replace(/"/g, "&quot;")}">
+
+          <div class="rounded-lg border border-border overflow-hidden">
+            <div class="grid grid-cols-[minmax(0,1fr)_110px_110px_130px_40px] gap-2 px-3 py-2 bg-muted/30 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div>Path pattern</div>
+              <div>Max / IP</div>
+              <div>Interval (s)</div>
+              <div>Targeted users</div>
+              <div></div>
+            </div>
+            <div id="rate-limit-rows" class="divide-y divide-border"></div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="rate-limit-add-btn" type="button" class="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted">+ Add rule</button>
+            <button id="rate-limit-save-btn" type="submit" disabled class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save rate limit settings</button>
+          </div>
+          <div id="rate-limit-result" class="text-sm"></div>
+        </form>
+      </div>
+
     <script>
       (function initSystemSettingsForms() {
         const googleForm = document.getElementById('google-oauth-settings-form');
@@ -1756,6 +1834,101 @@ collections.get("/system-settings", async (c) => {
         retainInput.addEventListener('input', updatePgSettingsUi);
 
         updatePgSettingsUi();
+
+        const rlForm = document.getElementById('rate-limit-form');
+        const rlEnabled = document.getElementById('rate-limit-enabled');
+        const rlRows = document.getElementById('rate-limit-rows');
+        const rlAddBtn = document.getElementById('rate-limit-add-btn');
+        const rlSaveBtn = document.getElementById('rate-limit-save-btn');
+        const rlHidden = document.getElementById('rate-limit-rules-json');
+
+        if (rlForm && rlEnabled && rlRows && rlAddBtn && rlSaveBtn && rlHidden) {
+          let rlRules = [];
+          try { rlRules = JSON.parse(rlHidden.value || '[]') || []; } catch (e) { rlRules = []; }
+          const initialRlState = JSON.stringify({ enabled: rlEnabled.checked, rules: rlRules });
+
+          const rlTargets = [
+            { value: 'all', label: 'All' },
+            { value: 'guest', label: 'Guest only' },
+            { value: 'auth', label: 'Auth only' },
+          ];
+
+          const renderRlRows = function() {
+            rlRows.innerHTML = '';
+            if (rlRules.length === 0) {
+              rlRows.innerHTML = '<div class="p-3 text-xs text-muted-foreground">No rules configured.</div>';
+            }
+            rlRules.forEach(function(rule, idx) {
+              const row = document.createElement('div');
+              row.className = 'grid grid-cols-[minmax(0,1fr)_110px_110px_130px_40px] gap-2 px-3 py-2 items-center';
+              const patternInput = document.createElement('input');
+              patternInput.type = 'text';
+              patternInput.value = rule.pattern || '';
+              patternInput.placeholder = '/api/*';
+              patternInput.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm font-mono';
+              patternInput.addEventListener('input', function() { rule.pattern = patternInput.value; syncRl(); });
+
+              const maxInput = document.createElement('input');
+              maxInput.type = 'number';
+              maxInput.min = '1';
+              maxInput.value = String(rule.maxRequests || 10);
+              maxInput.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm';
+              maxInput.addEventListener('input', function() { rule.maxRequests = parseInt(maxInput.value, 10) || 1; syncRl(); });
+
+              const intervalInput = document.createElement('input');
+              intervalInput.type = 'number';
+              intervalInput.min = '1';
+              intervalInput.value = String(rule.intervalSeconds || 60);
+              intervalInput.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm';
+              intervalInput.addEventListener('input', function() { rule.intervalSeconds = parseInt(intervalInput.value, 10) || 1; syncRl(); });
+
+              const targetSelect = document.createElement('select');
+              targetSelect.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm';
+              rlTargets.forEach(function(t) {
+                const opt = document.createElement('option');
+                opt.value = t.value;
+                opt.textContent = t.label;
+                if ((rule.targetedUsers || 'all') === t.value) opt.selected = true;
+                targetSelect.appendChild(opt);
+              });
+              targetSelect.addEventListener('change', function() { rule.targetedUsers = targetSelect.value; syncRl(); });
+
+              const removeBtn = document.createElement('button');
+              removeBtn.type = 'button';
+              removeBtn.className = 'inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground';
+              removeBtn.textContent = '\u00D7';
+              removeBtn.title = 'Remove rule';
+              removeBtn.addEventListener('click', function() {
+                rlRules.splice(idx, 1);
+                renderRlRows();
+                syncRl();
+              });
+
+              row.appendChild(patternInput);
+              row.appendChild(maxInput);
+              row.appendChild(intervalInput);
+              row.appendChild(targetSelect);
+              row.appendChild(removeBtn);
+              rlRows.appendChild(row);
+            });
+          };
+
+          const syncRl = function() {
+            rlHidden.value = JSON.stringify(rlRules);
+            const current = JSON.stringify({ enabled: rlEnabled.checked, rules: rlRules });
+            rlSaveBtn.disabled = current === initialRlState;
+          };
+
+          rlEnabled.addEventListener('change', syncRl);
+          rlAddBtn.addEventListener('click', function() {
+            rlRules.push({ label: '', pattern: '', maxRequests: 10, intervalSeconds: 60, targetedUsers: 'all' });
+            renderRlRows();
+            syncRl();
+          });
+
+          renderRlRows();
+          syncRl();
+        }
       })();
     </script>
 
@@ -1787,6 +1960,83 @@ collections.post("/system-settings/timezone", async (c) => {
     const errMsg = "Internal server error";
     return c.html(
       `<script>showToast(${JSON.stringify("Error saving timezone: " + errMsg)}, "error");</script>`,
+    );
+  }
+});
+
+collections.post("/system-settings/rate-limiting", async (c) => {
+  const collectionsBase = getCollectionsBasePath(c);
+  const body = await c.req.parseBody();
+
+  try {
+    const enabled = body.enabled === "true";
+    const rawJson =
+      typeof body.rules_json === "string" ? body.rules_json : "[]";
+    let parsedRules: any[] = [];
+    try {
+      const p = JSON.parse(rawJson);
+      if (Array.isArray(p)) parsedRules = p;
+    } catch {
+      return c.html(
+        `<script>showToast(${JSON.stringify("Invalid rules JSON payload.")}, "error");</script>`,
+      );
+    }
+
+    const cleaned: Array<{
+      label: string;
+      pattern: string;
+      maxRequests: number;
+      intervalSeconds: number;
+      targetedUsers: "all" | "guest" | "auth";
+    }> = [];
+    for (const r of parsedRules) {
+      if (!r || typeof r !== "object") continue;
+      const pattern = String(r.pattern || "").trim();
+      if (!pattern) continue;
+      if (pattern.length > 512) continue;
+      if (!/^[A-Za-z0-9._~:/?#\[\]@!$&'()+,;=\-*]+$/.test(pattern)) continue;
+      const maxRequests = Math.max(
+        1,
+        Math.min(1_000_000, Math.floor(Number(r.maxRequests) || 0)),
+      );
+      const intervalSeconds = Math.max(
+        1,
+        Math.min(86_400, Math.floor(Number(r.intervalSeconds) || 0)),
+      );
+      const targetedUsers: "all" | "guest" | "auth" =
+        r.targetedUsers === "guest" || r.targetedUsers === "auth"
+          ? r.targetedUsers
+          : "all";
+      const label = String(r.label || pattern).slice(0, 200);
+      cleaned.push({
+        label,
+        pattern,
+        maxRequests,
+        intervalSeconds,
+        targetedUsers,
+      });
+    }
+
+    const next = { enabled, rules: cleaned };
+    await sql`DELETE FROM _settings WHERE key = 'rate_limiting'`;
+    await sql`
+      INSERT INTO _settings (key, value)
+      VALUES ('rate_limiting', ${JSON.stringify(next)}::jsonb)
+    `;
+    invalidateRateLimitCache();
+
+    return c.html(`
+      <script>
+        showToast("Rate limiting settings saved.", "success");
+        if (window.htmx && typeof window.htmx.ajax === 'function') {
+          window.htmx.ajax('GET', '${collectionsBase}/system-settings', '#main-content');
+        }
+      </script>
+    `);
+  } catch (err: any) {
+    console.error("Rate limiting settings save error:", err);
+    return c.html(
+      `<script>showToast(${JSON.stringify("Failed to save rate limiting settings.")}, "error");</script>`,
     );
   }
 });
@@ -1978,9 +2228,20 @@ collections.post("/import", async (c) => {
   const results = [];
   let hasFailures = false;
   for (const col of parsed) {
+    let name: string = "";
     try {
-      const name = col.name;
+      name = typeof col.name === "string" ? col.name.trim() : "";
       if (!name) throw new Error("Missing collection name");
+      if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+        throw new Error(
+          "Collection name must contain only letters, numbers, and underscores.",
+        );
+      }
+      if (name.startsWith("_")) {
+        throw new Error(
+          "Collection names cannot start with an underscore (reserved for system).",
+        );
+      }
 
       const type = col.type || "base";
 
@@ -2667,6 +2928,7 @@ collections.get("/:collection/new-record", async (c) => {
     }
 
     const isAuthCollection = meta.length > 0 && meta[0].type === "auth";
+    const isSystemUsers = isUsersCollection(collectionName);
     const currentAdminRecord = isSystemUsers
       ? await getCurrentAdminRecord(c)
       : null;

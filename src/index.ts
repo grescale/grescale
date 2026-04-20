@@ -13,6 +13,7 @@ import { createBunWebSocket } from "hono/bun";
 import { verify } from "hono/jwt";
 import { getCookie } from "hono/cookie";
 import { getRequiredJwtSecret } from "./security.ts";
+import { timingSafeEqual } from "crypto";
 const { upgradeWebSocket, websocket } = createBunWebSocket();
 
 import sql from "./db/db.ts";
@@ -22,6 +23,7 @@ import collectionRoutes from "./api/collections.ts";
 import publicApiRoutes from "./api/public.ts";
 import adminRoutes from "./api/adminRoutes.ts";
 import { requireAuth } from "./middleware/auth.ts";
+import { globalRateLimit } from "./middleware/rateLimit.ts";
 
 const app = new Hono();
 
@@ -46,6 +48,68 @@ async function ensureDatabaseBootstrapped() {
   await dbBootstrapPromise;
 }
 
+// One-time bootstrap token required until both DATABASE_URL is configured
+// and the first admin exists. Set via env; auto-generated if absent. The token
+// is only printed to the server log while bootstrap is incomplete (no admin
+// yet) to avoid leaving secrets in logs once the instance is claimed.
+const BOOTSTRAP_TOKEN_FROM_ENV = (() => {
+  const existing = process.env.SETUP_TOKEN;
+  return existing && existing.trim() ? existing.trim() : "";
+})();
+const BOOTSTRAP_TOKEN = BOOTSTRAP_TOKEN_FROM_ENV || randomUUID();
+if (!BOOTSTRAP_TOKEN_FROM_ENV) {
+  process.env.SETUP_TOKEN = BOOTSTRAP_TOKEN;
+}
+
+let bootstrapTokenPrinted = false;
+async function maybePrintBootstrapToken() {
+  if (bootstrapTokenPrinted) return;
+  if (BOOTSTRAP_TOKEN_FROM_ENV) {
+    bootstrapTokenPrinted = true;
+    return;
+  }
+  let adminExists = false;
+  try {
+    if (process.env.DATABASE_URL) {
+      const res = await sql`SELECT 1 FROM _users LIMIT 1`;
+      adminExists = res.length > 0;
+    }
+  } catch {
+    adminExists = false;
+  }
+  if (adminExists) {
+    bootstrapTokenPrinted = true;
+    return;
+  }
+  console.log(
+    "\n============================================================\n" +
+      "SETUP_TOKEN (required to complete bootstrap):\n" +
+      `  ${BOOTSTRAP_TOKEN}\n` +
+      "Share this with the operator completing initial setup.\n" +
+      "============================================================\n",
+  );
+  bootstrapTokenPrinted = true;
+}
+void maybePrintBootstrapToken();
+
+function constantTimeEquals(a: string, b: string) {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
+
+function verifyBootstrapToken(c: any, provided: unknown) {
+  const expected = BOOTSTRAP_TOKEN;
+  const suppliedHeader = c.req.header("X-Setup-Token") || "";
+  const supplied =
+    typeof provided === "string" && provided.length > 0
+      ? provided
+      : suppliedHeader;
+  if (!supplied) return false;
+  return constantTimeEquals(supplied, expected);
+}
+
 function upsertEnvVar(content: string, key: string, value: string) {
   const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const line = `${key}="${escaped}"`;
@@ -55,6 +119,9 @@ function upsertEnvVar(content: string, key: string, value: string) {
   }
   return `${content.trim()}\n${line}\n`.replace(/^\n/, "");
 }
+
+// Configurable per-path rate limiting (driven by _settings.rate_limiting).
+app.use("*", globalRateLimit);
 
 // Baseline production-safe response headers.
 app.use("*", async (c, next) => {
@@ -169,6 +236,11 @@ app.get("/setup-db", (c) => {
             <label class="block text-sm font-medium mb-1">Database URL</label>
             <input type="text" name="database_url" placeholder="postgres://user:pass@localhost:5432/grescale" required class="w-full border p-2 rounded w-full">
           </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">Setup token</label>
+            <input type="password" name="setup_token" required autocomplete="off" class="w-full border p-2 rounded w-full">
+            <p class="text-xs text-slate-500 mt-1">Printed in the server log at first boot, or set via the <code>SETUP_TOKEN</code> env var.</p>
+          </div>
           <button type="submit" class="w-full bg-slate-900 text-white font-bold p-2 rounded hover:bg-slate-800">Connect & Initialize</button>
         </form>
       </div>
@@ -181,6 +253,12 @@ app.post("/setup-db", async (c) => {
   const body = await c.req.parseBody();
   const dbUrl =
     typeof body["database_url"] === "string" ? body["database_url"].trim() : "";
+  const providedToken =
+    typeof body["setup_token"] === "string" ? body["setup_token"] : "";
+
+  if (!verifyBootstrapToken(c, providedToken)) {
+    return c.redirect("/setup-db?error=Invalid%20setup%20token");
+  }
 
   if (!dbUrl) return c.redirect("/setup-db?error=URL is required");
 
@@ -295,14 +373,29 @@ app.use("*", async (c, next) => {
   }
 });
 
-// Mount custom endpoint dispatcher before API routes so it can intercept custom paths.
-app.route("/", customRouter);
+// Custom endpoints execute arbitrary server-side JS loaded from disk. Disabled by
+// default; opt in with ENABLE_CUSTOM_ENDPOINTS=1 (or true/yes). Keeping this off
+// until an admin explicitly enables it prevents a writable-scripts-dir foothold
+// from becoming instant RCE on boot.
+const CUSTOM_ENDPOINTS_ENABLED = (() => {
+  const raw = (process.env.ENABLE_CUSTOM_ENDPOINTS || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+})();
 
-// Load dynamic filesystem-backed custom endpoint scripts.
-if (process.env.DATABASE_URL) {
-  try {
-    await loadCustomScripts();
-  } catch (e) {}
+if (CUSTOM_ENDPOINTS_ENABLED) {
+  // Mount custom endpoint dispatcher before API routes so it can intercept custom paths.
+  app.route("/", customRouter);
+
+  // Load dynamic filesystem-backed custom endpoint scripts.
+  if (process.env.DATABASE_URL) {
+    try {
+      await loadCustomScripts();
+    } catch (e) {}
+  }
+} else {
+  console.log(
+    "[custom-endpoints] Disabled. Set ENABLE_CUSTOM_ENDPOINTS=1 to load filesystem scripts.",
+  );
 }
 
 // Mount modules
@@ -327,6 +420,12 @@ let logClients = new Set<any>();
 
 app.get(
   "/api/logs/stream",
+  async (c, next) => {
+    if (!(await ensureAdminSession(c))) {
+      return c.text("Unauthorized", 401);
+    }
+    return next();
+  },
   upgradeWebSocket((c) => {
     return {
       onOpen(event, ws) {

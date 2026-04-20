@@ -399,37 +399,3 @@ export function formatBytes(bytes: number) {
   return `${value.toFixed(1)} ${units[idx]}`;
 }
 
-export async function runScheduledPgBackupIfDue() {
-  try {
-    const settings = await getPgBackupSettings();
-    if (!settings.enabled) return;
-
-    const nowMs = Date.now();
-    const lastMs = settings.lastRunAt
-      ? new Date(settings.lastRunAt).getTime()
-      : 0;
-    const intervalMs = PG_BACKUP_INTERVAL_MS[settings.frequency];
-
-    if (!Number.isFinite(lastMs) || nowMs - lastMs >= intervalMs) {
-      await runPgDumpBackupOnce("scheduled");
-    }
-  } catch (err) {
-    console.warn("Scheduled pg_dump backup skipped:", err);
-  }
-}
-
-let pgBackupSchedulerStarted = false;
-
-export function ensurePgBackupSchedulerStarted() {
-  if (pgBackupSchedulerStarted) return;
-  pgBackupSchedulerStarted = true;
-
-  if (typeof Bun === "undefined" || typeof Bun.cron !== "function") {
-    console.warn("Bun.cron is unavailable; pg_dump scheduler disabled.");
-    return;
-  }
-
-  Bun.cron("* * * * *", async () => {
-    await runScheduledPgBackupIfDue();
-  });
-}

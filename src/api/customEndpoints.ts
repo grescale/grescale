@@ -4,7 +4,7 @@ import {
   listCustomEndpointFiles,
   readCustomEndpointFile,
   writeCustomEndpointFile,
-} from "../customScripts.ts";
+} from "../services/customScriptsBackend.ts";
 
 export const customEndpoints = new Hono();
 

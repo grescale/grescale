@@ -167,8 +167,22 @@ export async function initializeDatabase() {
 
     // Ensure default google setting exists
     await sql`
-      INSERT INTO _settings (key, value) 
+      INSERT INTO _settings (key, value)
       VALUES ('google_oauth', '{"enabled": false, "client_id": "", "client_secret": ""}'::jsonb)
+      ON CONFLICT (key) DO NOTHING;
+    `;
+
+    // Ensure default rate limiting setting exists
+    await sql`
+      INSERT INTO _settings (key, value)
+      VALUES (
+        'rate_limiting',
+        '{"enabled": false, "rules": [
+          {"label": "Admin login", "pattern": "/internal/api/auth/login", "maxRequests": 10, "intervalSeconds": 900, "targetedUsers": "all"},
+          {"label": "Admin setup", "pattern": "/internal/api/auth/setup", "maxRequests": 5, "intervalSeconds": 600, "targetedUsers": "all"},
+          {"label": "Public auth-with-password", "pattern": "/api/collections/*/auth-with-password", "maxRequests": 20, "intervalSeconds": 900, "targetedUsers": "all"}
+        ]}'::jsonb
+      )
       ON CONFLICT (key) DO NOTHING;
     `;
 

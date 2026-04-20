@@ -57,7 +57,7 @@ test.describe("Admin Dashboard UI Tests", () => {
       await page.goto("/admin");
 
       // wait for htmx
-      await page.waitForFunction(() => window.htmx !== undefined);
+      await page.waitForFunction(() => (window as any).htmx !== undefined);
 
       // Click 'New Collection'
       await page.click('button[title="New Collection"]');

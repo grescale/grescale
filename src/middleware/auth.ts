@@ -1,6 +1,7 @@
 import { getCookie } from "hono/cookie";
 import { verify } from "hono/jwt";
 import { getRequiredJwtSecret } from "../security.ts";
+import sql from "../db/db.ts";
 
 export const requireAuth = async (c: any, next: any) => {
   const isApiRequest = c.req.path.startsWith("/api/");
@@ -89,7 +90,17 @@ export const requireAuth = async (c: any, next: any) => {
       );
     }
 
-    // Store user data in context for downstream routes
+    // Re-verify the admin still exists so revoked accounts can't reuse a token.
+    const userId = (payload as any).id;
+    if (!userId) {
+      throw new Error("Token missing user id");
+    }
+    const rows =
+      await sql`SELECT id FROM _users WHERE id = ${userId} LIMIT 1`;
+    if (rows.length === 0) {
+      throw new Error("User no longer exists");
+    }
+
     c.set("user", payload);
     await next();
   } catch (err) {

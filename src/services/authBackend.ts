@@ -2,6 +2,14 @@ import sql from "../db/db.ts";
 import { sign } from "hono/jwt";
 import { setCookie, deleteCookie } from "hono/cookie";
 import { getRequiredJwtSecret } from "../security.ts";
+import { timingSafeEqual } from "crypto";
+
+function constantTimeEquals(a: string, b: string) {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return timingSafeEqual(aBuf, bBuf);
+}
 
 export async function handleSetupRequest(c: any) {
   try {
@@ -13,6 +21,21 @@ export async function handleSetupRequest(c: any) {
     }
 
     const body = await c.req.parseBody();
+
+    // Require the bootstrap setup token until the first admin exists. This
+    // prevents an attacker from racing to claim a freshly deployed instance.
+    const expectedToken = (process.env.SETUP_TOKEN || "").trim();
+    const providedToken =
+      (typeof body.setup_token === "string" && body.setup_token) ||
+      c.req.header("X-Setup-Token") ||
+      "";
+    if (!expectedToken || !constantTimeEquals(providedToken, expectedToken)) {
+      return c.html(
+        `<div class="bg-red-100 text-red-700 p-2 rounded text-sm text-center">Invalid or missing setup token.</div>`,
+        401,
+      );
+    }
+
     const email = body.email;
     const password = body.password;
     if (!email || !password || password.length < 8) {

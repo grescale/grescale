@@ -1,5 +1,5 @@
 import sql from "../db/db.ts";
-import { verify, sign } from "hono/jwt";
+import { sign } from "hono/jwt";
 import { type RuleEvaluationContext, satisfiesRule } from "../ruleEngine.ts";
 import { getCookie, deleteCookie } from "hono/cookie";
 import { getRequiredJwtSecret } from "../security.ts";
