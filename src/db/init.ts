@@ -93,6 +93,33 @@ async function repairLegacyCollectionSchema() {
   }
 }
 
+async function repairUsersOwnershipSchema() {
+  try {
+    await sql`ALTER TABLE _users ADD COLUMN IF NOT EXISTS owner BOOLEAN NOT NULL DEFAULT FALSE`;
+
+    const ownerRows =
+      await sql`SELECT id FROM _users WHERE owner = TRUE ORDER BY created_at ASC, id ASC`;
+    if (ownerRows.length === 0) {
+      const firstUser =
+        await sql`SELECT id FROM _users ORDER BY created_at ASC, id ASC LIMIT 1`;
+      if (firstUser.length > 0) {
+        await sql`UPDATE _users SET owner = FALSE`;
+        await sql`UPDATE _users SET owner = TRUE WHERE id = ${firstUser[0].id}`;
+      }
+    } else if (ownerRows.length > 1) {
+      const keepOwnerId = ownerRows[0].id;
+      await sql`UPDATE _users SET owner = FALSE WHERE id <> ${keepOwnerId}`;
+      await sql`UPDATE _users SET owner = TRUE WHERE id = ${keepOwnerId}`;
+    }
+
+    try {
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS _users_single_owner_idx ON _users (owner) WHERE owner = TRUE`;
+    } catch (_err) {}
+  } catch (err) {
+    console.warn("User ownership migration skipped due to error:", err);
+  }
+}
+
 export async function initializeDatabase() {
   console.log("Initializing database tables...");
 
@@ -103,6 +130,7 @@ export async function initializeDatabase() {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
+        owner BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
@@ -174,6 +202,8 @@ export async function initializeDatabase() {
         "Could not alter _collections, might already exist or need manual migration.",
       );
     }
+
+    await repairUsersOwnershipSchema();
 
     await repairLegacyCollectionSchema();
 

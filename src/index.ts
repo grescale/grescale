@@ -2,13 +2,17 @@ import { initDb } from "./db/db.ts";
 import { initializeDatabase } from "./db/init.ts";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { randomUUID } from "crypto";
-import { loadCustomScripts, customRouter } from "./customScripts.ts";
+import {
+  loadCustomScripts,
+  customRouter,
+} from "./services/customScriptsBackend.ts";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { createBunWebSocket } from "hono/bun";
 
 import { verify } from "hono/jwt";
 import { getCookie } from "hono/cookie";
+import { getRequiredJwtSecret } from "./security.ts";
 const { upgradeWebSocket, websocket } = createBunWebSocket();
 
 import sql from "./db/db.ts";
@@ -50,14 +54,6 @@ function upsertEnvVar(content: string, key: string, value: string) {
     return content.replace(pattern, line);
   }
   return `${content.trim()}\n${line}\n`.replace(/^\n/, "");
-}
-
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret && process.env.NODE_ENV === "production") {
-    throw new Error("JWT_SECRET must be set in production");
-  }
-  return secret || "super-secret-default-key";
 }
 
 // Baseline production-safe response headers.
@@ -115,8 +111,9 @@ app.use("*", async (c, next) => {
       err.message?.includes("authentication failed") ||
       err.message?.includes("connect")
     ) {
+      console.error("Database startup error:", err);
       return c.html(
-        `<div style="font-family: sans-serif; padding: 20px; color: red;"><h1>Database Error</h1><p>${err.message}</p><p>Update your .env file or restart the server.</p></div>`,
+        `<div style="font-family: sans-serif; padding: 20px; color: red;"><h1>Database Error</h1><p>Unable to connect to the database.</p><p>Update your environment configuration or restart the server.</p></div>`,
       );
     } else {
       // Means tables might not exist, initialize them dynamically
@@ -145,8 +142,15 @@ app.use("*", async (c, next) => {
 
 app.get("/setup-db", (c) => {
   const error = c.req.query("error");
+  const escapeHtml = (value: string) =>
+    value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   const errMsg = error
-    ? `<div class="bg-red-100 text-red-700 p-3 rounded mb-4">${error}</div>`
+    ? `<div class="bg-red-100 text-red-700 p-3 rounded mb-4">${escapeHtml(error)}</div>`
     : "";
   return c.html(`
     <!doctype html>
@@ -212,7 +216,8 @@ app.post("/setup-db", async (c) => {
     return c.redirect("/setup");
   } catch (err: any) {
     process.env.DATABASE_URL = ""; // Unset to force prompt again
-    return c.redirect("/setup-db?error=" + encodeURIComponent(err.message));
+    console.error("Database setup error:", err);
+    return c.redirect("/setup-db?error=Setup%20failed");
   }
 });
 
@@ -358,7 +363,7 @@ async function ensureAdminSession(c: any) {
   try {
     const token = getCookie(c, "admin_session");
     if (!token) return false;
-    const payload = await verify(token, getJwtSecret(), "HS256");
+    const payload = await verify(token, getRequiredJwtSecret(), "HS256");
     if (payload.type !== "admin") return false;
     return true;
   } catch {
@@ -421,7 +426,7 @@ app.get("/login", async (c) => {
   try {
     const token = getCookie(c, "admin_session");
     if (token) {
-      const payload = await verify(token, getJwtSecret(), "HS256");
+      const payload = await verify(token, getRequiredJwtSecret(), "HS256");
       if (payload.type === "admin") return c.redirect("/collections");
     }
   } catch {

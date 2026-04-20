@@ -268,9 +268,7 @@ customEndpoints.post("/save", async (c) => {
   const code = typeof body.code === "string" ? body.code : "";
 
   if (!fileName) {
-    return c.html(
-      `<script>showToast("File name is required.", "error");</script>`,
-    );
+    return c.json({ error: "File name is required." }, 422);
   }
 
   const normalizedName = await writeCustomEndpointFile(fileName, code);
@@ -294,7 +292,7 @@ customEndpoints.post("/delete", async (c) => {
     typeof body.original_name === "string" ? body.original_name.trim() : "";
 
   if (!fileName) {
-    return c.html(`<script>showToast("Missing file name.", "error");</script>`);
+    return c.json({ error: "Missing file name." }, 422);
   }
 
   await deleteCustomEndpointFile(fileName);

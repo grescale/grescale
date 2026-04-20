@@ -1,9 +1,18 @@
 import { Hono } from "hono";
 import sql from "../db/db.ts";
-import { verify } from "hono/jwt";
-import { sign } from "hono/jwt";
-import { satisfiesRule, type RuleEvaluationContext } from "../ruleEngine.ts";
 import { buildSafeSqlFilter } from "../sqlSafety.ts";
+import {
+  buildRuleContext,
+  getGoogleOAuthRedirectUri,
+  getValidatedGoogleOAuthConfig,
+  handleGoogleOAuthCallback,
+  sanitizeRecord,
+} from "../services/publicBackend.ts";
+import { setCookie } from "hono/cookie";
+import { sign, verify } from "hono/jwt";
+import { satisfiesRule } from "../ruleEngine.ts";
+import { getRequiredJwtSecret } from "../security.ts";
+import { quoteIdentifier } from "../services/collectionsBackend.ts";
 
 type PublicApiEnv = {
   Variables: {
@@ -14,7 +23,31 @@ type PublicApiEnv = {
 
 const publicApi = new Hono<PublicApiEnv>();
 
-// Auth user sign in for collections dynamically
+// User-writable system fields for auth collections. All other system
+// fields (verified, token_key, password_hash, created, updated, etc.)
+// are rejected to prevent mass-assignment privilege escalation.
+const USER_WRITABLE_SYSTEM_FIELDS: Record<"create" | "update", Set<string>> = {
+  create: new Set(["id", "email", "username", "password"]),
+  update: new Set(["email", "username", "password"]),
+};
+
+function buildAllowedBodyKeys(
+  schema: any[],
+  op: "create" | "update",
+): Set<string> {
+  const allowed = new Set<string>();
+  const writableSystem = USER_WRITABLE_SYSTEM_FIELDS[op];
+  for (const field of schema) {
+    if (!field?.name) continue;
+    if (field.system) {
+      if (writableSystem.has(field.name)) allowed.add(field.name);
+    } else {
+      allowed.add(field.name);
+    }
+  }
+  return allowed;
+}
+
 publicApi.post("/collections/:collection/auth-with-password", async (c) => {
   const collectionName = c.req.param("collection");
   const body = await c.req.json();
@@ -50,11 +83,7 @@ publicApi.post("/collections/:collection/auth-with-password", async (c) => {
     }
 
     const user = users[0];
-    const secret = process.env.JWT_SECRET;
-    if (!secret && process.env.NODE_ENV === "production") {
-      throw new Error("JWT_SECRET must be set in production");
-    }
-    const finalSecret = secret || "super-secret-default-key";
+    const finalSecret = getRequiredJwtSecret();
 
     // Create JWT containing the user ID, Email, and collection context mapping to their specific table
     const token = await sign(
@@ -78,30 +107,23 @@ publicApi.post("/collections/:collection/auth-with-password", async (c) => {
       record: userSafe,
     });
   } catch (err: any) {
+    console.error("Public auth error:", err);
     return c.json(
       {
-        error:
-          process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : "Configuration or SQL Error: " + err.message,
+        error: "Internal server error",
       },
       500,
     );
   }
 });
 
-// Middleware to extract the public bearer token and assess API Rules for List/View
 publicApi.use("/collections/:collection/records*", async (c, next) => {
   const authHeader = c.req.header("Authorization");
   const cookieHeader = c.req.header("Cookie");
   let user: any = null;
 
   try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret && process.env.NODE_ENV === "production") {
-      throw new Error("JWT_SECRET must be set in production");
-    }
-    const finalSecret = secret || "super-secret-default-key";
+    const finalSecret = getRequiredJwtSecret();
 
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.slice(7);
@@ -114,184 +136,6 @@ publicApi.use("/collections/:collection/records*", async (c, next) => {
   c.set("auth_user", user);
   await next();
 });
-// Build a richer rule context for PocketBase-style expressions.
-function buildRuleContext(
-  c: any,
-  collectionName: string,
-  extras: Partial<RuleEvaluationContext> = {},
-): RuleEvaluationContext {
-  const query: Record<string, string> = {};
-  const searchParams = new URL(c.req.url).searchParams;
-  searchParams.forEach((value, key) => {
-    query[key] = value;
-  });
-
-  return {
-    user: c.get("auth_user"),
-    collectionName,
-    collection: { name: collectionName },
-    method: c.req.method,
-    path: new URL(c.req.url).pathname,
-    query,
-    ...extras,
-  };
-}
-
-// Remove sensitive fields
-function sanitizeRecord(r: any) {
-  const clean = { ...r };
-  delete clean.password_hash;
-  delete clean.token_key;
-  return clean;
-}
-
-function getPublicAppOrigin() {
-  const configured = [
-    process.env.PUBLIC_APP_URL,
-    process.env.APP_URL,
-    process.env.SITE_URL,
-    process.env.BASE_URL,
-  ].find((value) => typeof value === "string" && value.trim() !== "");
-
-  if (configured) {
-    return new URL(configured).origin;
-  }
-
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("PUBLIC_APP_URL must be set in production");
-  }
-
-  return new URL("http://localhost:8080").origin;
-}
-
-function getGoogleOAuthRedirectUri() {
-  return `${getPublicAppOrigin()}/api/collections/auth-with-oauth2/google/callback`;
-}
-
-function quoteIdentifier(value: string) {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-async function getValidatedGoogleOAuthConfig(collectionName: string) {
-  const meta =
-    await sql`SELECT type, oauth2 FROM _collections WHERE name = ${collectionName} LIMIT 1`;
-  if (meta.length === 0 || meta[0].type !== "auth") {
-    return { error: "Invalid auth collection" as const };
-  }
-
-  let localOauth2 = meta[0].oauth2;
-  if (typeof localOauth2 === "string") localOauth2 = JSON.parse(localOauth2);
-
-  if (!localOauth2?.google_enabled) {
-    return {
-      error: "Google OAuth2 is not enabled for this collection" as const,
-    };
-  }
-
-  const gSet =
-    await sql`SELECT value FROM _settings WHERE key = 'google_oauth' LIMIT 1`;
-  if (gSet.length === 0) {
-    return { error: "Google OAuth2 is not globally configured" as const };
-  }
-
-  let globalOauth2 = gSet[0].value;
-  if (typeof globalOauth2 === "string") globalOauth2 = JSON.parse(globalOauth2);
-
-  if (!globalOauth2?.enabled || !globalOauth2?.client_id) {
-    return {
-      error: "Google OAuth2 is not globally configured or enabled" as const,
-    };
-  }
-
-  return {
-    meta,
-    localOauth2,
-    globalOauth2,
-  } as const;
-}
-
-async function handleGoogleOAuthCallback(
-  c: any,
-  collectionName: string,
-  redirectUri: string,
-) {
-  const code = c.req.query("code");
-
-  if (!code) return c.json({ error: "Authorization code missing" }, 400);
-
-  const validation = await getValidatedGoogleOAuthConfig(collectionName);
-  if ("error" in validation) {
-    return c.json({ error: validation.error }, 400);
-  }
-
-  // Exchange code for token
-  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: validation.globalOauth2.client_id,
-      client_secret: validation.globalOauth2.client_secret,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: redirectUri,
-    }),
-  });
-
-  const tokenData = await tokenRes.json();
-  if (tokenData.error) {
-    return c.json(
-      { error: tokenData.error_description || tokenData.error },
-      400,
-    );
-  }
-
-  // Get user info
-  const userRes = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-    headers: { Authorization: `Bearer ${tokenData.access_token}` },
-  });
-
-  const userData = await userRes.json();
-  if (!userData.email) {
-    return c.json({ error: "Could not fetch email from Google" }, 400);
-  }
-
-  // Upsert user
-  let users =
-    await sql`SELECT * FROM ${sql(collectionName)} WHERE email = ${userData.email} LIMIT 1`;
-  let user;
-
-  if (users.length === 0) {
-    // Create random password hash so they can't login via normal password effectively
-    const fakeHash = crypto.randomUUID();
-    const insertRes = await sql`
-        INSERT INTO ${sql(collectionName)} (email, password_hash) 
-        VALUES (${userData.email}, ${fakeHash}) 
-        RETURNING *
-      `;
-    user = insertRes[0];
-  } else {
-    user = users[0];
-  }
-
-  const payload = {
-    auth_user: sanitizeRecord(user),
-    auth_type: "google",
-    collection: collectionName,
-    timestamp: Date.now(),
-  };
-
-  const token = await signJwt(payload);
-
-  // Redirect to success page or home with token cookie
-  const headers = new Headers();
-  headers.append(
-    "Set-Cookie",
-    `token=${token}; Path=/; HttpOnly; SameSite=Lax; ${process.env.NODE_ENV === "production" ? "Secure;" : ""}`,
-  );
-  headers.append("Location", "/");
-  return new Response(null, { status: 302, headers });
-}
-
 // Initiate Google OAuth2 flow
 publicApi.get("/collections/:collection/auth-with-oauth2/google", async (c) => {
   const collectionName = c.req.param("collection");
@@ -303,7 +147,18 @@ publicApi.get("/collections/:collection/auth-with-oauth2/google", async (c) => {
       return c.json({ error: validation.error }, 400);
     }
 
-    const state = JSON.stringify({ collection: collectionName });
+    const state = JSON.stringify({
+      collection: collectionName,
+      nonce: crypto.randomUUID(),
+    });
+    setCookie(c, "google_oauth_state", state, {
+      path: "/",
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      sameSite: "Lax",
+      maxAge: 10 * 60,
+    });
+
     const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     authUrl.searchParams.set("client_id", validation.globalOauth2.client_id);
     authUrl.searchParams.set("redirect_uri", redirectUri);
@@ -318,12 +173,10 @@ publicApi.get("/collections/:collection/auth-with-oauth2/google", async (c) => {
 
     return c.redirect(authUrl.toString());
   } catch (err: any) {
+    console.error("Public OAuth initiation error:", err);
     return c.json(
       {
-        error:
-          process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : err.message,
+        error: "Internal server error",
       },
       500,
     );
@@ -350,7 +203,7 @@ publicApi.get("/collections/auth-with-oauth2/google/callback", async (c) => {
     return c.json({ error: "Invalid collection in OAuth state" }, 400);
   }
 
-  return handleGoogleOAuthCallback(c, collectionName, redirectUri);
+  return handleGoogleOAuthCallback(c, redirectUri);
 });
 
 // Public Records List Endpoint
@@ -430,12 +283,10 @@ publicApi.get("/collections/:collection/records", async (c) => {
       items: records.map(sanitizeRecord),
     });
   } catch (err: any) {
+    console.error("Public records list error:", err);
     return c.json(
       {
-        error:
-          process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : err.message,
+        error: "Internal server error",
       },
       500,
     );
@@ -490,13 +341,11 @@ publicApi.get("/collections/:collection/records/:id", async (c) => {
 
     return c.json(sanitizeRecord(records[0]));
   } catch (err: any) {
+    console.error("Public record fetch error:", err);
     return c.json(
       {
         code: 500,
-        message:
-          process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : err.message,
+        message: "Internal server error",
         data: {},
       },
       500,
@@ -553,11 +402,13 @@ publicApi.post("/collections/:collection/records", async (c) => {
           : meta[0].schema;
     }
 
-    const cleanBody: Record<string, any> = { ...body };
-    for (const key of Object.keys(cleanBody)) {
+    const allowedKeys = buildAllowedBodyKeys(definedSchema, "create");
+    const cleanBody: Record<string, any> = {};
+    for (const key of keys) {
+      if (!allowedKeys.has(key)) continue;
       const fieldDef = definedSchema.find((f) => f.name === key);
-      if (fieldDef && fieldDef.type === "date_only" && cleanBody[key]) {
-        const valStr = String(cleanBody[key]);
+      if (fieldDef && fieldDef.type === "date_only" && body[key]) {
+        const valStr = String(body[key]);
         const d = new Date(valStr);
         if (!isNaN(d.getTime())) {
           let yyyy = d.getFullYear().toString();
@@ -568,7 +419,11 @@ publicApi.post("/collections/:collection/records", async (c) => {
           else if (fmt === "DD/MM/YYYY") cleanBody[key] = `${dd}/${mm}/${yyyy}`;
           else if (fmt === "YYYY/MM/DD") cleanBody[key] = `${yyyy}/${mm}/${dd}`;
           else cleanBody[key] = `${yyyy}-${mm}-${dd}`;
+        } else {
+          cleanBody[key] = body[key];
         }
+      } else {
+        cleanBody[key] = body[key];
       }
     }
     // Keep optional custom id on create; if blank/invalid empty value, let DB generate it.
@@ -576,15 +431,8 @@ publicApi.post("/collections/:collection/records", async (c) => {
       delete cleanBody.id;
     }
 
-    // Filter immutable and system managed fields
-    delete cleanBody.created;
-    delete cleanBody.updated;
-    delete cleanBody.created_at;
-    delete cleanBody.updated_at;
-    delete cleanBody.token_key;
-    delete cleanBody.password_hash;
-    if (meta[0].type === "auth" && body.password) {
-      cleanBody.password_hash = await Bun.password.hash(body.password);
+    if (meta[0].type === "auth" && cleanBody.password) {
+      cleanBody.password_hash = await Bun.password.hash(cleanBody.password);
       delete cleanBody.password;
     }
 
@@ -596,12 +444,10 @@ publicApi.post("/collections/:collection/records", async (c) => {
 
     return c.json(sanitizeRecord(result[0]));
   } catch (err: any) {
+    console.error("Public create error:", err);
     return c.json(
       {
-        error:
-          process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : err.message,
+        error: "Internal server error",
       },
       500,
     );
@@ -662,44 +508,38 @@ publicApi.patch("/collections/:collection/records/:id", async (c) => {
           : meta[0].schema;
     }
 
-    // Filter out id injection
+    const allowedKeys = buildAllowedBodyKeys(definedSchema, "update");
     const cleanBody: Record<string, any> = {};
-    const protectedFields = [
-      "id",
-      "created",
-      "updated",
-      "created_at",
-      "updated_at",
-      "token_key",
-      "password_hash",
-    ];
-    keys
-      .filter((k) => !protectedFields.includes(k))
-      .forEach((k) => {
-        const fieldDef = definedSchema.find((f) => f.name === k);
-        if (fieldDef && fieldDef.type === "date_only" && body[k]) {
-          const valStr = String(body[k]);
-          const d = new Date(valStr);
-          if (!isNaN(d.getTime())) {
-            let yyyy = d.getFullYear().toString();
-            let mm = String(d.getMonth() + 1).padStart(2, "0");
-            let dd = String(d.getDate()).padStart(2, "0");
-            const fmt = fieldDef.date_format || "YYYY-MM-DD";
-            if (fmt === "DD-MM-YYYY") cleanBody[k] = `${dd}-${mm}-${yyyy}`;
-            else if (fmt === "DD/MM/YYYY") cleanBody[k] = `${dd}/${mm}/${yyyy}`;
-            else if (fmt === "YYYY/MM/DD") cleanBody[k] = `${yyyy}/${mm}/${dd}`;
-            else cleanBody[k] = `${yyyy}-${mm}-${dd}`;
-          } else {
-            cleanBody[k] = body[k];
-          }
+    for (const k of keys) {
+      if (!allowedKeys.has(k)) continue;
+      const fieldDef = definedSchema.find((f) => f.name === k);
+      if (fieldDef && fieldDef.type === "date_only" && body[k]) {
+        const valStr = String(body[k]);
+        const d = new Date(valStr);
+        if (!isNaN(d.getTime())) {
+          let yyyy = d.getFullYear().toString();
+          let mm = String(d.getMonth() + 1).padStart(2, "0");
+          let dd = String(d.getDate()).padStart(2, "0");
+          const fmt = fieldDef.date_format || "YYYY-MM-DD";
+          if (fmt === "DD-MM-YYYY") cleanBody[k] = `${dd}-${mm}-${yyyy}`;
+          else if (fmt === "DD/MM/YYYY") cleanBody[k] = `${dd}/${mm}/${yyyy}`;
+          else if (fmt === "YYYY/MM/DD") cleanBody[k] = `${yyyy}/${mm}/${dd}`;
+          else cleanBody[k] = `${yyyy}-${mm}-${dd}`;
         } else {
           cleanBody[k] = body[k];
         }
-      });
+      } else {
+        cleanBody[k] = body[k];
+      }
+    }
 
-    if (meta[0].type === "auth" && body.password) {
-      cleanBody.password_hash = await Bun.password.hash(body.password);
+    if (meta[0].type === "auth" && cleanBody.password) {
+      cleanBody.password_hash = await Bun.password.hash(cleanBody.password);
       delete cleanBody.password;
+    }
+
+    if (Object.keys(cleanBody).length === 0) {
+      return c.json({ error: "No writable fields provided" }, 400);
     }
 
     cleanBody["updated_at"] = new Date();
@@ -720,12 +560,10 @@ publicApi.patch("/collections/:collection/records/:id", async (c) => {
       );
     return c.json(sanitizeRecord(result[0]));
   } catch (err: any) {
+    console.error("Public update error:", err);
     return c.json(
       {
-        error:
-          process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : err.message,
+        error: "Internal server error",
       },
       500,
     );
@@ -794,12 +632,10 @@ publicApi.delete("/collections/:collection/records/:id", async (c) => {
       );
     return c.json({ success: true });
   } catch (err: any) {
+    console.error("Public delete error:", err);
     return c.json(
       {
-        error:
-          process.env.NODE_ENV === "production"
-            ? "Internal server error"
-            : err.message,
+        error: "Internal server error",
       },
       500,
     );

@@ -1,5 +1,6 @@
 import { getCookie } from "hono/cookie";
 import { verify } from "hono/jwt";
+import { getRequiredJwtSecret } from "../security.ts";
 
 export const requireAdminAuth = async (c: any, next: any) => {
   // Admin panel only: requires HTMX request + valid cookie
@@ -22,12 +23,7 @@ export const requireAdminAuth = async (c: any, next: any) => {
   }
 
   try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret && process.env.NODE_ENV === "production") {
-      throw new Error("JWT_SECRET must be set in production");
-    }
-    const finalSecret = secret || "super-secret-default-key";
-    const payload = await verify(token, finalSecret, "HS256");
+    const payload = await verify(token, getRequiredJwtSecret(), "HS256");
 
     // Throw forbidden if not superadmin
     if (payload.type !== "admin") {

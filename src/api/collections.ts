@@ -3,445 +3,214 @@ import sql from "../db/db.ts";
 import { countCustomEndpointFiles } from "../customScripts.ts";
 import { renderTemplate } from "../views/templateEngine.ts";
 import { assertReadOnlySqlQuery, buildSafeSqlFilter } from "../sqlSafety.ts";
-import { mkdir, readdir, stat, unlink, access } from "fs/promises";
-import { join, basename } from "path";
+import {
+  COMMON_TIMEZONES,
+  DEFAULT_APP_TIMEZONE,
+  DEFAULT_PG_BACKUP_SETTINGS,
+  PG_BACKUP_DIR,
+  PG_BACKUP_FREQUENCIES,
+  PG_BACKUP_INTERVAL_MS,
+  type PgBackupFrequency,
+  type PgBackupSettings,
+  applyPgBackupRetention,
+  convertLocalDateTimeInTimeZoneToUtcIso,
+  ensureBackupDir,
+  ensurePgBackupSchedulerStarted,
+  formatBytes,
+  formatDateOnlyForInput,
+  formatDateTimeForInput,
+  getConfiguredTimeZone,
+  getCollectionsBasePath,
+  getDatePartsInTimeZone,
+  getPgBackupSettings,
+  isValidIanaTimeZone,
+  listPgBackupFiles,
+  makePgBackupFilename,
+  normalizePgBackupFrequency,
+  normalizeRetainCount,
+  quoteIdentifier,
+  restorePgDumpBackup,
+  runPgDumpBackupOnce,
+  runScheduledPgBackupIfDue,
+  safeTimeZone,
+  sanitizeBackupFilename,
+  savePgBackupSettings,
+} from "../services/collectionsBackend.ts";
 
 export const collections = new Hono();
 
-function getCollectionsBasePath(c: any) {
-  return c.req.path.startsWith("/admin/") ||
-    c.req.path.startsWith("/internal/api/collections")
-    ? "/internal/api/collections"
-    : "/api/collections";
-}
-
-function quoteIdentifier(value: string) {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-const DEFAULT_APP_TIMEZONE = "UTC";
-
-function isValidIanaTimeZone(timeZone: string) {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
-    return true;
-  } catch (_err) {
-    return false;
-  }
-}
-
-function safeTimeZone(timeZone?: string | null) {
-  if (!timeZone) return DEFAULT_APP_TIMEZONE;
-  return isValidIanaTimeZone(timeZone) ? timeZone : DEFAULT_APP_TIMEZONE;
-}
-
-async function getConfiguredTimeZone() {
-  try {
-    const rows =
-      await sql`SELECT value FROM _settings WHERE key = 'timezone' LIMIT 1`;
-    if (rows.length === 0) return DEFAULT_APP_TIMEZONE;
-    const raw = rows[0].value;
-    if (typeof raw === "string") {
-      try {
-        const parsed = JSON.parse(raw);
-        if (typeof parsed === "string") return safeTimeZone(parsed);
-        if (parsed && typeof parsed.timezone === "string") {
-          return safeTimeZone(parsed.timezone);
-        }
-      } catch (_err) {
-        return safeTimeZone(raw);
-      }
-    }
-    if (raw && typeof raw.timezone === "string") {
-      return safeTimeZone(raw.timezone);
-    }
-  } catch (_err) {}
-  return DEFAULT_APP_TIMEZONE;
-}
-
-function getDatePartsInTimeZone(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const map: Record<string, string> = {};
-  for (const p of parts) {
-    if (p.type !== "literal") map[p.type] = p.value;
-  }
-  return {
-    year: map.year,
-    month: map.month,
-    day: map.day,
-    hour: map.hour,
-    minute: map.minute,
-    second: map.second,
-  };
-}
-
-function formatDateOnlyForInput(value: any, timeZone: string) {
-  if (!value) return "";
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
-  }
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return String(value);
-  const parts = getDatePartsInTimeZone(date, timeZone);
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-function formatDateTimeForInput(value: any, timeZone: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (isNaN(date.getTime())) return String(value).slice(0, 16);
-  const parts = getDatePartsInTimeZone(date, timeZone);
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
-}
-
-function getTimeZoneOffsetMillis(utcMillis: number, timeZone: string) {
-  const date = new Date(utcMillis);
-  const parts = getDatePartsInTimeZone(date, timeZone);
-  const asUtcMillis = Date.UTC(
-    parseInt(parts.year, 10),
-    parseInt(parts.month, 10) - 1,
-    parseInt(parts.day, 10),
-    parseInt(parts.hour, 10),
-    parseInt(parts.minute, 10),
-    parseInt(parts.second, 10),
-  );
-  return asUtcMillis - utcMillis;
-}
-
-function convertLocalDateTimeInTimeZoneToUtcIso(
-  localValue: string,
-  timeZone: string,
-) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(
-    localValue,
-  );
-  if (!m) return localValue;
-  const year = parseInt(m[1], 10);
-  const month = parseInt(m[2], 10);
-  const day = parseInt(m[3], 10);
-  const hour = parseInt(m[4], 10);
-  const minute = parseInt(m[5], 10);
-  const second = m[6] ? parseInt(m[6], 10) : 0;
-
-  const targetUtcLike = Date.UTC(year, month - 1, day, hour, minute, second);
-  let utcMillis = targetUtcLike;
-  for (let i = 0; i < 3; i += 1) {
-    const offset = getTimeZoneOffsetMillis(utcMillis, timeZone);
-    utcMillis = targetUtcLike - offset;
-  }
-  return new Date(utcMillis).toISOString();
-}
-
-const COMMON_TIMEZONES = [
-  "UTC",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Toronto",
-  "America/Sao_Paulo",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Berlin",
-  "Europe/Madrid",
-  "Europe/Warsaw",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Asia/Seoul",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-];
-
-const PG_BACKUP_DIR = join(process.cwd(), "backups", "pg_dump");
-const PG_BACKUP_FREQUENCIES = [
-  "30m",
-  "1h",
-  "12h",
-  "daily",
-  "weekly",
-  "monthly",
-] as const;
-type PgBackupFrequency = (typeof PG_BACKUP_FREQUENCIES)[number];
-
-type PgBackupSettings = {
-  enabled: boolean;
-  frequency: PgBackupFrequency;
-  retainCount: number;
-  lastRunAt: string | null;
-};
-
-const DEFAULT_PG_BACKUP_SETTINGS: PgBackupSettings = {
-  enabled: false,
-  frequency: "daily",
-  retainCount: 3,
-  lastRunAt: null,
-};
-
-const PG_BACKUP_INTERVAL_MS: Record<PgBackupFrequency, number> = {
-  "30m": 30 * 60 * 1000,
-  "1h": 60 * 60 * 1000,
-  "12h": 12 * 60 * 60 * 1000,
-  daily: 24 * 60 * 60 * 1000,
-  weekly: 7 * 24 * 60 * 60 * 1000,
-  monthly: 30 * 24 * 60 * 60 * 1000,
-};
-
-let pgBackupSchedulerStarted = false;
-
-function normalizePgBackupFrequency(value: string): PgBackupFrequency {
-  if ((PG_BACKUP_FREQUENCIES as readonly string[]).includes(value)) {
-    return value as PgBackupFrequency;
-  }
-  return DEFAULT_PG_BACKUP_SETTINGS.frequency;
-}
-
-function normalizeRetainCount(value: unknown) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return DEFAULT_PG_BACKUP_SETTINGS.retainCount;
-  return Math.max(1, Math.min(100, Math.floor(parsed)));
-}
-
-async function ensureBackupDir() {
-  await mkdir(PG_BACKUP_DIR, { recursive: true });
-}
-
-async function getPgBackupSettings(): Promise<PgBackupSettings> {
-  try {
-    const rows =
-      await sql`SELECT value FROM _settings WHERE key = 'pg_backup' LIMIT 1`;
-    if (rows.length === 0) return { ...DEFAULT_PG_BACKUP_SETTINGS };
-    const raw = rows[0].value;
-    const parsed =
-      typeof raw === "string"
-        ? (() => {
-            try {
-              return JSON.parse(raw);
-            } catch (_err) {
-              return {};
-            }
-          })()
-        : raw || {};
-
-    return {
-      enabled: parsed.enabled === true,
-      frequency: normalizePgBackupFrequency(String(parsed.frequency || "")),
-      retainCount: normalizeRetainCount(parsed.retainCount),
-      lastRunAt:
-        typeof parsed.lastRunAt === "string" && parsed.lastRunAt
-          ? parsed.lastRunAt
-          : null,
-    };
-  } catch (_err) {
-    return { ...DEFAULT_PG_BACKUP_SETTINGS };
-  }
-}
-
-async function savePgBackupSettings(next: PgBackupSettings) {
-  await sql`DELETE FROM _settings WHERE key = 'pg_backup'`;
-  await sql`
-    INSERT INTO _settings (key, value)
-    VALUES (
-      'pg_backup',
-      ${JSON.stringify({
-        enabled: next.enabled,
-        frequency: next.frequency,
-        retainCount: normalizeRetainCount(next.retainCount),
-        lastRunAt: next.lastRunAt || null,
-      })}::jsonb
-    )
-  `;
-}
-
-function makePgBackupFilename() {
-  const now = new Date();
-  const y = now.getUTCFullYear();
-  const mo = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(now.getUTCDate()).padStart(2, "0");
-  const h = String(now.getUTCHours()).padStart(2, "0");
-  const mi = String(now.getUTCMinutes()).padStart(2, "0");
-  const s = String(now.getUTCSeconds()).padStart(2, "0");
-  return `pg_backup_${y}${mo}${d}_${h}${mi}${s}.dump`;
-}
-
-async function listPgBackupFiles() {
-  await ensureBackupDir();
-  const names = (await readdir(PG_BACKUP_DIR)) as string[];
-  const backupNames = names.filter((name: string) => name.endsWith(".dump"));
-
-  const withStats = await Promise.all(
-    backupNames.map(async (name: string) => {
-      const fullPath = join(PG_BACKUP_DIR, name);
-      const fileStat = await stat(fullPath);
-      return {
-        name,
-        fullPath,
-        mtimeMs: fileStat.mtimeMs,
-        sizeBytes: fileStat.size,
-      };
-    }),
-  );
-
-  return withStats.sort(
-    (a: { mtimeMs: number }, b: { mtimeMs: number }) => b.mtimeMs - a.mtimeMs,
-  );
-}
-
-function sanitizeBackupFilename(input: string) {
-  const onlyBase = basename(input || "");
-  if (!/^pg_backup_[0-9]{8}_[0-9]{6}\.dump$/.test(onlyBase)) {
-    throw new Error("Invalid backup filename");
-  }
-  return onlyBase;
-}
-
-async function applyPgBackupRetention(retainCount: number) {
-  const normalized = normalizeRetainCount(retainCount);
-  const files = await listPgBackupFiles();
-  const toDelete = files.slice(normalized);
-  for (const file of toDelete) {
-    await unlink(file.fullPath);
-  }
-}
-
-async function runPgDumpBackupOnce(reason: "manual" | "scheduled") {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not set");
-  }
-
-  await ensureBackupDir();
-  const fileName = makePgBackupFilename();
-  const fullPath = join(PG_BACKUP_DIR, fileName);
-
-  const child = Bun.spawn(
-    [
-      "pg_dump",
-      "--dbname",
-      databaseUrl,
-      "--format=custom",
-      "--file",
-      fullPath,
-      "--no-owner",
-      "--no-privileges",
-    ],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-
-  const exitCode = await child.exited;
-  if (exitCode !== 0) {
-    const stderrText = await new Response(child.stderr).text();
-    try {
-      await unlink(fullPath);
-    } catch (_err) {}
-    throw new Error(
-      `pg_dump failed (${reason}) with code ${exitCode}: ${stderrText || "Unknown error"}`,
-    );
-  }
-
-  const settings = await getPgBackupSettings();
-  settings.lastRunAt = new Date().toISOString();
-  await savePgBackupSettings(settings);
-  await applyPgBackupRetention(settings.retainCount);
-
-  return { fileName, fullPath };
-}
-
-async function restorePgDumpBackup(filename: string) {
-  const safeFileName = sanitizeBackupFilename(filename);
-  const fullPath = join(PG_BACKUP_DIR, safeFileName);
-  await access(fullPath);
-
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is not set");
-  }
-
-  const child = Bun.spawn(
-    [
-      "pg_restore",
-      "--dbname",
-      databaseUrl,
-      "--clean",
-      "--if-exists",
-      "--no-owner",
-      "--no-privileges",
-      fullPath,
-    ],
-    {
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-
-  const exitCode = await child.exited;
-  if (exitCode !== 0) {
-    const stderrText = await new Response(child.stderr).text();
-    throw new Error(
-      `pg_restore failed with code ${exitCode}: ${stderrText || "Unknown error"}`,
-    );
-  }
-}
-
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let idx = 0;
-  while (value >= 1024 && idx < units.length - 1) {
-    value /= 1024;
-    idx += 1;
-  }
-  return `${value.toFixed(1)} ${units[idx]}`;
-}
-
-async function runScheduledPgBackupIfDue() {
-  try {
-    const settings = await getPgBackupSettings();
-    if (!settings.enabled) return;
-
-    const nowMs = Date.now();
-    const lastMs = settings.lastRunAt
-      ? new Date(settings.lastRunAt).getTime()
-      : 0;
-    const intervalMs = PG_BACKUP_INTERVAL_MS[settings.frequency];
-
-    if (!Number.isFinite(lastMs) || nowMs - lastMs >= intervalMs) {
-      await runPgDumpBackupOnce("scheduled");
-    }
-  } catch (err) {
-    console.warn("Scheduled pg_dump backup skipped:", err);
-  }
-}
-
-function ensurePgBackupSchedulerStarted() {
-  if (pgBackupSchedulerStarted) return;
-  pgBackupSchedulerStarted = true;
-
-  if (typeof Bun === "undefined" || typeof Bun.cron !== "function") {
-    console.warn("Bun.cron is unavailable; pg_dump scheduler disabled.");
-    return;
-  }
-
-  Bun.cron("* * * * *", async () => {
-    await runScheduledPgBackupIfDue();
+function htmxErrorResponse(message: string, status = 422) {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { "Content-Type": "application/json" },
   });
 }
 
-ensurePgBackupSchedulerStarted();
+function escapeSqlConstraintLiteral(value: string) {
+  return value.replace(/'/g, "''");
+}
+
+function buildSqlConstraintName(
+  collectionName: string,
+  fieldName: string,
+  suffix: string,
+) {
+  const rawName = `ck_${collectionName}_${fieldName}_${suffix}`
+    .replace(/[^a-zA-Z0-9_]/g, "_")
+    .replace(/_+/g, "_");
+  return rawName.slice(0, 63);
+}
+
+function buildFieldSqlType(field: any) {
+  let safeType = String(field.type || "text")
+    .toLowerCase()
+    .trim();
+  switch (safeType) {
+    case "text":
+    case "richtext":
+    case "email":
+    case "url":
+    case "file":
+      return "TEXT";
+    case "number":
+      return "NUMERIC";
+    case "boolean":
+    case "bool":
+      return "BOOLEAN";
+    case "json":
+    case "jsonb":
+    case "geolocation":
+      return "JSONB";
+    case "date":
+    case "datetime":
+      return "TIMESTAMP WITH TIME ZONE";
+    case "date_only":
+      return "VARCHAR(10)";
+    case "relation":
+      if (field.relation_collection) {
+        if (!/^[a-zA-Z0-9_]+$/.test(field.relation_collection)) {
+          throw new Error(
+            `Invalid relation collection: ${field.relation_collection}`,
+          );
+        }
+        return `UUID REFERENCES "${field.relation_collection}"(id)`;
+      }
+      return "UUID";
+    case "uuid":
+      return "UUID";
+    default:
+      return field.type.replace(/[^a-zA-Z0-9_\(\)]/g, "");
+  }
+}
+
+function buildFieldChecks(field: any, fieldName: string, tableName: string) {
+  const checks: Array<{ suffix: string; expression: string }> = [];
+  const type = String(field.type || "text").toLowerCase();
+
+  if (field.required) {
+    checks.push({
+      suffix: "required",
+      expression: `"${fieldName.replace(/"/g, '""')}" IS NOT NULL`,
+    });
+  }
+
+  if (type === "text" && field.regex) {
+    checks.push({
+      suffix: "regex",
+      expression: `"${fieldName.replace(/"/g, '""')}" ~ '${escapeSqlConstraintLiteral(String(field.regex))}'`,
+    });
+  }
+
+  if (type === "number") {
+    const quoted = `"${fieldName.replace(/"/g, '""')}"`;
+    if (field.nonzero) {
+      checks.push({ suffix: "nonzero", expression: `${quoted} != 0` });
+    }
+    if (field.min !== undefined && field.min !== "") {
+      checks.push({
+        suffix: "min",
+        expression: `${quoted} >= ${Number(field.min)}`,
+      });
+    }
+    if (field.max !== undefined && field.max !== "") {
+      checks.push({
+        suffix: "max",
+        expression: `${quoted} <= ${Number(field.max)}`,
+      });
+    }
+  }
+
+  return checks;
+}
+
+function buildFieldColumnDefinition(field: any) {
+  const columnName = field.name.replace(/"/g, '""');
+  const columnType = buildFieldSqlType(field);
+  return `"${columnName}" ${columnType}${field.required ? " NOT NULL" : ""}`;
+}
+
+function shouldTrimTextInput(fieldDef: any) {
+  const fieldType = String(fieldDef?.type || "").toLowerCase();
+  return (
+    fieldDef &&
+    fieldDef.trim_input === true &&
+    (fieldType === "text" || fieldType === "richtext")
+  );
+}
+
+function normalizeTextInputValue(fieldDef: any, rawValue: any) {
+  if (!shouldTrimTextInput(fieldDef)) {
+    return rawValue;
+  }
+
+  return typeof rawValue === "string"
+    ? rawValue.trim()
+    : String(rawValue).trim();
+}
+
+function isUsersCollection(collectionName: string) {
+  return collectionName === "_users";
+}
+
+async function getCurrentAdminRecord(c: any) {
+  const sessionUser = c.get("user");
+  if (!sessionUser?.id) return null;
+  const rows = await sql`
+    SELECT id, owner
+    FROM _users
+    WHERE id = ${sessionUser.id}
+    LIMIT 1
+  `;
+  return rows[0] || null;
+}
+
+async function syncFieldSqlConstraints(
+  tableName: string,
+  field: any,
+  previousName?: string,
+) {
+  const currentName = String(field.name);
+  const currentChecks = buildFieldChecks(field, currentName, tableName);
+  const namesToDrop = new Set<string>([
+    currentName,
+    previousName || currentName,
+  ]);
+
+  for (const fieldName of namesToDrop) {
+    const currentField = String(fieldName);
+    for (const suffix of ["required", "regex", "nonzero", "min", "max"]) {
+      await sql.unsafe(
+        `ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS "${buildSqlConstraintName(tableName, currentField, suffix)}"`,
+      );
+    }
+  }
+
+  for (const check of currentChecks) {
+    await sql.unsafe(
+      `ALTER TABLE "${tableName}" ADD CONSTRAINT "${buildSqlConstraintName(tableName, currentName, check.suffix)}" CHECK (${check.expression}) NOT VALID`,
+    );
+  }
+}
 
 collections.get("/new", async (c) => {
   const collectionsBase = getCollectionsBasePath(c);
@@ -916,6 +685,10 @@ collections.get("/new", async (c) => {
               <div class="col-span-2 mt-2 field-text-settings hidden">
                 <label class="block text-xs font-medium text-foreground mb-1">Regex Validation</label>
                 <input type="text" class="field-regex flex h-8 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="e.g. ^[a-z]+$">
+                  <div class="mt-3 flex items-center space-x-2 field-trim-wrapper hidden">
+                    <input type="checkbox" class="field-trim-input rounded border-input text-primary w-4 h-4 shadow-sm">
+                    <label class="text-sm font-medium">Trim Input</label>
+                  </div>
               </div>
               
               <div class="col-span-2 flex items-center gap-6 mt-1 mb-2">
@@ -950,18 +723,12 @@ collections.get("/new", async (c) => {
                 </select>
               </div>
             </div>
-          </div>\`;
-          container.insertAdjacentHTML('beforeend', html);
-          
-          // Setup type change listener to show/hide options
-          const el = document.getElementById(id);
-          if (!el) return;
-          const typeSelect = el.querySelector('.field-type');
-          const textSettings = el.querySelector('.field-text-settings');
-          const numSettings = el.querySelector('.field-number-settings');
-          const relationSettings = el.querySelector('.field-relation-settings');
-          const nonZeroWrapper = el.querySelector('.field-nonzero-wrapper');
+          <div>
+            <label class="block text-sm font-medium text-foreground mb-1">passwordConfirm</label>
+            <input type="password" name="passwordConfirm" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
+          </div>
           const dateSettings = el.querySelector('.field-date-settings');
+          const trimWrapper = el.querySelector('.field-trim-wrapper');
 
           const syncFieldSettings = function() {
             const value = typeSelect ? typeSelect.value : 'text';
@@ -971,18 +738,21 @@ collections.get("/new", async (c) => {
             if (relationSettings) relationSettings.classList.add('hidden');
             if (nonZeroWrapper) nonZeroWrapper.classList.add('hidden');
             if (dateSettings) dateSettings.classList.add('hidden');
+            if (trimWrapper) trimWrapper.classList.add('hidden');
 
             if (value === 'number') {
               if (numSettings) numSettings.classList.remove('hidden');
               if (nonZeroWrapper) nonZeroWrapper.classList.remove('hidden');
             } else if (value === 'text') {
               if (textSettings) textSettings.classList.remove('hidden');
+              if (trimWrapper) trimWrapper.classList.remove('hidden');
             } else if (value === 'relation') {
               if (relationSettings) relationSettings.classList.remove('hidden');
             } else if (value === 'date_only') {
               if (dateSettings) dateSettings.classList.remove('hidden');
             } else if (value === 'richtext' || value === 'json' || value === 'file' || value === 'email' || value === 'url') {
               if (textSettings) textSettings.classList.remove('hidden');
+              if (value === 'richtext' && trimWrapper) trimWrapper.classList.remove('hidden');
             }
           };
 
@@ -1039,6 +809,9 @@ collections.get("/new", async (c) => {
                        fieldObj.max = el.querySelector('.field-max').value;
                     } else if (type === 'text') {
                        fieldObj.regex = el.querySelector('.field-regex').value;
+                        fieldObj.trim_input = el.querySelector('.field-trim-input') ? el.querySelector('.field-trim-input').checked : false;
+                      } else if (type === 'richtext') {
+                        fieldObj.trim_input = el.querySelector('.field-trim-input') ? el.querySelector('.field-trim-input').checked : false;
                     } else if (type === 'relation') {
                        fieldObj.relation_collection = el.querySelector('.field-relation-collection').value;
                     } else if (type === 'date_only') {
@@ -1134,19 +907,19 @@ collections.post("/", async (c) => {
           name: "id",
           type: "text",
           system: true,
-          required: true,
+          required: false,
         });
         finalFields.push({
           name: "created",
           type: "date",
           system: true,
-          required: true,
+          required: false,
         });
         finalFields.push({
           name: "updated",
           type: "date",
           system: true,
-          required: true,
+          required: false,
         });
       }
 
@@ -1156,13 +929,13 @@ collections.post("/", async (c) => {
       };
 
       if (type === "auth") {
-        query += `, "username" VARCHAR(255) UNIQUE, email VARCHAR(255) UNIQUE, verified BOOLEAN DEFAULT FALSE, password_hash VARCHAR(255), token_key VARCHAR(255) DEFAULT gen_random_uuid()`;
+        query += `, "username" VARCHAR(255) UNIQUE${authOptions.auth_method === "username" || authOptions.auth_method === "both" ? " NOT NULL" : ""}, email VARCHAR(255) UNIQUE${authOptions.auth_method === "email" || authOptions.auth_method === "both" ? " NOT NULL" : ""}, verified BOOLEAN NOT NULL DEFAULT FALSE, password_hash VARCHAR(255) NOT NULL, token_key VARCHAR(255) NOT NULL DEFAULT gen_random_uuid()`;
 
         finalFields.push({
           name: "id",
           type: "text",
           system: true,
-          required: true,
+          required: false,
         });
 
         if (authOptions.auth_method === "username") {
@@ -1170,14 +943,14 @@ collections.post("/", async (c) => {
             name: "username",
             type: "text",
             system: true,
-            required: true,
+            required: false,
           });
         } else {
           finalFields.push({
             name: "email",
             type: "email",
             system: true,
-            required: true,
+            required: false,
           });
         }
 
@@ -1185,31 +958,31 @@ collections.post("/", async (c) => {
           name: "verified",
           type: "boolean",
           system: true,
-          required: true,
+          required: false,
         });
         finalFields.push({
           name: "password",
           type: "password",
           system: true,
-          required: true,
+          required: false,
         });
         finalFields.push({
           name: "passwordConfirm",
           type: "password",
           system: true,
-          required: true,
+          required: false,
         });
         finalFields.push({
           name: "created",
           type: "date",
           system: true,
-          required: true,
+          required: false,
         });
         finalFields.push({
           name: "updated",
           type: "date",
           system: true,
-          required: true,
+          required: false,
         });
       }
 
@@ -1242,70 +1015,14 @@ collections.post("/", async (c) => {
         if (!field.name || !/^[a-zA-Z0-9_]+$/.test(field.name))
           throw new Error(`Invalid field name: ${field.name}`);
 
-        let safeType = field.type.toLowerCase().trim();
-        switch (safeType) {
-          case "text":
-          case "richtext":
-          case "email":
-          case "url":
-          case "file":
-            safeType = "TEXT";
-            break;
-          case "number":
-            safeType = "NUMERIC";
-            break;
-          case "boolean":
-          case "bool":
-            safeType = "BOOLEAN";
-            break;
-          case "json":
-          case "jsonb":
-          case "geolocation":
-            safeType = "JSONB";
-            break;
-          case "date":
-          case "datetime":
-            safeType = "TIMESTAMP WITH TIME ZONE";
-            break;
-          case "date_only":
-            safeType = "VARCHAR(10)";
-            break;
-          case "relation":
-            safeType = "UUID";
-            if (field.relation_collection) {
-              if (!/^[a-zA-Z0-9_]+$/.test(field.relation_collection)) {
-                throw new Error(
-                  `Invalid relation collection: ${field.relation_collection}`,
-                );
-              }
-              safeType += ` REFERENCES "${field.relation_collection}"(id)`;
-            }
-            break;
-          case "uuid":
-            safeType = "UUID";
-            break;
-          default:
-            safeType = field.type.replace(/[^a-zA-Z0-9_\(\)]/g, "");
-            break;
-        }
-
-        query += `, "${field.name}" ${safeType}`;
-        if (field.type === "text" && field.regex) {
-          query += ` CHECK ("${field.name}" ~ '${field.regex.replace(/'/g, "''")}')`;
-        }
-        if (field.type === "number") {
-          if (field.nonzero) {
-            query += ` CHECK ("${field.name}" != 0)`;
-          }
-          if (field.min !== undefined && field.min !== "")
-            query += ` CHECK ("${field.name}" >= ${Number(field.min)})`;
-          if (field.max !== undefined && field.max !== "")
-            query += ` CHECK ("${field.name}" <= ${Number(field.max)})`;
+        query += `, ${buildFieldColumnDefinition(field)}`;
+        for (const check of buildFieldChecks(field, field.name, name)) {
+          query += `, CONSTRAINT "${buildSqlConstraintName(name, field.name, check.suffix)}" CHECK (${check.expression})`;
         }
       }
       query += `,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
       );`;
 
       await sql.unsafe(query);
@@ -1405,12 +1122,12 @@ collections.get("/", async (c) => {
 
           const settingsIcon = `<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.02a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.02a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.02a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
           return `
-        <div data-collection-item data-collection-name="${t.table_name}" class="group flex items-center justify-between w-full rounded-lg border border-transparent bg-card px-3 py-2 transition-colors hover:border-border hover:bg-muted/50">
+        <div data-collection-item data-collection-name="${t.table_name}" class="group flex items-center justify-between w-full rounded-lg border border-transparent bg-card px-3 py-2 transition-colors hover:bg-muted">
           <button 
             hx-get="${collectionsBase}/${t.table_name}/records" 
             hx-target="#main-content"
             hx-push-url="/collections/${t.table_name}"
-            class="flex flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left text-sm font-medium text-foreground transition outline-none"
+            class="flex flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left text-sm font-medium text-foreground transition outline-none hover:bg-muted hover:text-foreground"
           >
             <span class="inline-flex items-center">${typeIcon}${t.table_name}</span>
           </button>
@@ -1434,8 +1151,10 @@ collections.get("/", async (c) => {
         500,
       );
     }
+    console.error("Failed to load collections:", err);
     return c.html(
-      `<div class="text-red-500 text-sm">Failed to load collections: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>`,
+      `<div class="text-red-500 text-sm">Failed to load collections.</div>`,
+      500,
     );
   }
 });
@@ -1604,6 +1323,7 @@ collections.get("/api-tester", async (c) => {
   } catch (err) {
     return c.html(
       `<div class="text-red-500 p-4">Error loading collections</div>`,
+      500,
     );
   }
 });
@@ -1649,6 +1369,7 @@ collections.post("/sql-explorer", async (c) => {
   if (!query || query.trim() === "") {
     return c.html(
       `<div class="p-4 text-red-500 bg-red-50">Query cannot be empty.</div>`,
+      400,
     );
   }
 
@@ -1781,10 +1502,11 @@ collections.post("/sql-explorer", async (c) => {
       </table>
     `);
   } catch (err: any) {
+    console.error("SQL explorer error:", err);
     return c.html(`
       <div class="p-4 bg-red-50 text-red-700 font-mono text-sm border-b border-red-200">
         <strong class="block mb-1">Execution Error:</strong>
-        <div class="whitespace-pre-wrap">${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>
+        <div class="whitespace-pre-wrap">Internal server error</div>
       </div>
     `);
   }
@@ -1878,7 +1600,7 @@ collections.get("/system-settings", async (c) => {
             <select id="system-timezone-select" name="timezone" data-initial-value="${configuredTimeZone}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
               ${COMMON_TIMEZONES.map((tz) => `<option value="${tz}" ${tz === configuredTimeZone ? "selected" : ""}>${tz}</option>`).join("")}
             </select>
-            <button id="timezone-save-btn" type="submit" disabled class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">
+            <button id="timezone-save-btn" type="submit" disabled class="inline-flex h-10 shrink-0 items-center justify-center whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">
               Save Timezone
             </button>
           </div>
@@ -2061,10 +1783,8 @@ collections.post("/system-settings/timezone", async (c) => {
       </script>
     `);
   } catch (err: any) {
-    const errMsg =
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message;
+    console.error("Timezone save error:", err);
+    const errMsg = "Internal server error";
     return c.html(
       `<script>showToast(${JSON.stringify("Error saving timezone: " + errMsg)}, "error");</script>`,
     );
@@ -2097,10 +1817,8 @@ collections.post("/system-settings/google-oauth", async (c) => {
       </script>
     `);
   } catch (err: any) {
-    const errMsg =
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message;
+    console.error("Google OAuth settings save error:", err);
+    const errMsg = "Internal server error";
     return c.html(
       `<script>showToast(${JSON.stringify("Failed to save Google OAuth settings: " + errMsg)}, "error");</script>`,
     );
@@ -2131,10 +1849,8 @@ collections.post("/backup/pg/settings", async (c) => {
       </script>
     `);
   } catch (err: any) {
-    const errMsg =
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message;
+    console.error("Backup settings save error:", err);
+    const errMsg = "Internal server error";
     return c.html(
       `<script>showToast(${JSON.stringify("Failed to save pg_dump settings: " + errMsg)}, "error");</script>`,
     );
@@ -2155,10 +1871,8 @@ collections.post("/backup/pg/run", async (c) => {
       </script>
     `);
   } catch (err: any) {
-    const errMsg =
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message;
+    console.error("Backup run error:", err);
+    const errMsg = "Internal server error";
     return c.html(
       `<script>showToast(${JSON.stringify("Backup failed: " + errMsg)}, "error");</script>`,
     );
@@ -2187,13 +1901,20 @@ collections.post("/backup/pg/restore", async (c) => {
   const collectionsBase = getCollectionsBasePath(c);
   const body = await c.req.parseBody();
   const filename = String(body.filename || "");
+  const escapeHtml = (value: string) =>
+    value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
 
   try {
     await restorePgDumpBackup(filename);
 
     return c.html(`
       <script>
-        showToast("Backup restored from ${filename}.", "success");
+        showToast(${JSON.stringify(`Backup restored from ${escapeHtml(filename)}.`)}, "success");
         setTimeout(() => {
           if (window.htmx && typeof window.htmx.ajax === 'function') {
             window.htmx.ajax('GET', '${collectionsBase}', '#collections-list');
@@ -2205,10 +1926,8 @@ collections.post("/backup/pg/restore", async (c) => {
       </script>
     `);
   } catch (err: any) {
-    const errMsg =
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message;
+    console.error("Backup restore error:", err);
+    const errMsg = "Internal server error";
     return c.html(
       `<script>showToast(${JSON.stringify("Restore failed: " + errMsg)}, "error");</script>`,
     );
@@ -2243,6 +1962,7 @@ collections.post("/import", async (c) => {
   if (!jsonStr)
     return c.html(
       `<div class="text-red-500 text-sm">Please provide JSON data.</div>`,
+      400,
     );
 
   let parsed: any[];
@@ -2251,12 +1971,12 @@ collections.post("/import", async (c) => {
     if (!Array.isArray(parsed))
       throw new Error("Root must be an array of collections.");
   } catch (err: any) {
-    return c.html(
-      `<div class="text-red-500 text-sm">Invalid JSON: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>`,
-    );
+    console.error("Import JSON error:", err);
+    return c.html(`<div class="text-red-500 text-sm">Invalid JSON.</div>`, 400);
   }
 
   const results = [];
+  let hasFailures = false;
   for (const col of parsed) {
     try {
       const name = col.name;
@@ -2325,23 +2045,39 @@ collections.post("/import", async (c) => {
       }
 
       results.push(
-        `<div class="text-green-600 border-b pb-1 mb-1 border-gray-100"><i data-lucide="check-circle-2" class="w-4 h-4 inline-block align-middle text-green-500 mr-1"></i> Imported <strong>${name}</strong> successfully.</div>`,
+        `<div class="text-green-600 border-b pb-1 mb-1 border-gray-100"><i data-lucide="check-circle-2" class="w-4 h-4 inline-block align-middle text-green-500 mr-1"></i> Imported <strong>${String(name).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;")}</strong> successfully.</div>`,
       );
     } catch (e: any) {
+      console.error("Collection import error:", e);
+      const safeCollectionName = String(name)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+      const safeErrorMessage = String(e.message || "Unknown error")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
       results.push(
-        `<div class="text-red-500 border-b pb-1 mb-1 border-gray-100"><i data-lucide="x-circle" class="w-4 h-4 inline-block align-middle text-red-500 mr-1"></i> Failed <strong>${col.name || "unknown"}</strong>: ${e.message}</div>`,
+        `<div class="text-red-500 border-b pb-1 mb-1 border-gray-100"><i data-lucide="x-circle" class="w-4 h-4 inline-block align-middle text-red-500 mr-1"></i> Failed <strong>${safeCollectionName}</strong>: ${safeErrorMessage}</div>`,
       );
     }
   }
 
-  return c.html(`
+  return c.html(
+    `
     <div class="p-3 bg-white border border-border rounded shadow-sm text-sm mt-2 max-h-48 overflow-y-auto font-mono">
       ${results.join("")}
     </div>
     <button hx-get="${collectionsBase}" hx-target="#collections-list" class="mt-4 inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full">
       <i data-lucide="refresh-cw" class="w-4 h-4 inline-block align-middle mr-1"></i> Refresh Sidebar
     </button>
-  `);
+  `,
+    hasFailures ? 422 : 200,
+  );
 });
 
 collections.get("/logs", async (c) => {
@@ -2373,21 +2109,14 @@ collections.get("/logs", async (c) => {
     });
     return c.html(html);
   } catch (err: any) {
+    console.error("Logs route error:", err);
     if (!isHtmxRequest) {
-      return c.json(
-        {
-          error:
-            process.env.NODE_ENV === "production"
-              ? "Internal server error"
-              : err.message,
-        },
-        500,
-      );
+      return c.json({ error: "Internal server error" }, 500);
     }
     const html = await renderTemplate("error-message", {
-      message: `Logs error: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}`,
+      message: `Logs error: Internal server error`,
     });
-    return c.html(html);
+    return c.html(html, 500);
   }
 });
 
@@ -2488,7 +2217,10 @@ collections.get("/:collection/records", async (c) => {
         records = rows;
         totalItems = parseInt(countRes[0].count, 10);
       } catch (e) {
-        return c.html(`<div class="text-red-500">Invalid filter syntax.</div>`);
+        return c.html(
+          `<div class="text-red-500">Invalid filter syntax.</div>`,
+          400,
+        );
       }
     } else {
       records = await sql.unsafe(
@@ -2513,9 +2245,11 @@ collections.get("/:collection/records", async (c) => {
       const allColumns = Object.keys(sanitizedRecords[0]);
       const idCol = allColumns.includes("id") ? ["id"] : [];
       const systemColumns = ["created_at", "updated_at"];
-      const userColumns = allColumns.filter(
-        (col) => col !== "id" && !systemColumns.includes(col),
-      );
+      const userColumns = allColumns.filter((col) => {
+        if (col === "id" || systemColumns.includes(col)) return false;
+        if (collectionName === "_users" && col === "owner") return false;
+        return true;
+      });
       const orderedSystemColumns = systemColumns.filter((col) =>
         allColumns.includes(col),
       );
@@ -2625,6 +2359,13 @@ collections.get("/:collection/records", async (c) => {
                   onclick='copyCollectionId(event, ${JSON.stringify(fullId)})'
                 >${shortId}</button>
               </td>`;
+            }
+            if (collectionName === "_users" && col === "email") {
+              const ownerBadge =
+                record.owner === true
+                  ? `<span class="ml-2 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">Owner</span>`
+                  : "";
+              return `<td class="px-6 py-4 whitespace-nowrap text-foreground max-w-[24rem] overflow-hidden text-left"><div class="flex items-center gap-2 min-w-0">${displayVal}${ownerBadge}</div></td>`;
             }
             const tdAlignClass = centeredColumns.has(col)
               ? "text-center"
@@ -2776,6 +2517,15 @@ collections.get("/:collection/records", async (c) => {
               },
             });
             const html = await response.text();
+
+            if (!response.ok) {
+              const tmp = document.createElement('div');
+              tmp.innerHTML = html;
+              const message = (tmp.textContent || '').trim() || 'Unable to open record.';
+              if (window.showToast) window.showToast(message, 'error');
+              return;
+            }
+
             const drawerContainer = document.getElementById('drawer-container');
             if (!drawerContainer) return;
             drawerContainer.innerHTML = html;
@@ -2790,6 +2540,7 @@ collections.get("/:collection/records", async (c) => {
             window.history.replaceState({}, '', currentUrl.pathname + currentUrl.search + currentUrl.hash);
           } catch (error) {
             console.error('Failed to open record editor:', error);
+            if (window.showToast) window.showToast('Failed to open record editor.', 'error');
           }
         };
 
@@ -2894,8 +2645,10 @@ collections.get("/:collection/records", async (c) => {
 
     return c.html(contentHtml);
   } catch (err: any) {
+    console.error("Collection page error:", err);
     return c.html(
-      `<div class="text-red-500 p-4 bg-red-50 rounded border border-red-200">Collection error: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>`,
+      `<div class="text-red-500 p-4 bg-red-50 rounded border border-red-200">Collection error: Internal server error</div>`,
+      500,
     );
   }
 });
@@ -2907,10 +2660,17 @@ collections.get("/:collection/new-record", async (c) => {
     const meta =
       await sql`SELECT type, schema, oauth2 FROM _collections WHERE name = ${collectionName} LIMIT 1`;
     if (meta.length > 0 && meta[0].type === "view") {
-      return c.html(`<div class="text-red-500 p-4">Views are read only.</div>`);
+      return c.html(
+        `<div class="text-red-500 p-4">Views are read only.</div>`,
+        405,
+      );
     }
 
     const isAuthCollection = meta.length > 0 && meta[0].type === "auth";
+    const currentAdminRecord = isSystemUsers
+      ? await getCurrentAdminRecord(c)
+      : null;
+    const canManageOwnership = currentAdminRecord?.owner === true;
     let authMethod = "email";
     if (isAuthCollection && meta[0].oauth2) {
       try {
@@ -2927,7 +2687,7 @@ collections.get("/:collection/new-record", async (c) => {
       FROM information_schema.columns 
       WHERE table_name = ${collectionName} 
         AND table_schema = 'public'
-        AND column_name NOT IN ('id', 'created', 'updated', 'created_at', 'updated_at', 'password_hash', 'token_key', 'verified', 'password', 'passwordconfirm')
+        AND column_name NOT IN ('id', 'created', 'updated', 'created_at', 'updated_at', 'password_hash', 'token_key', 'verified', 'password', 'passwordconfirm', 'owner')
     `;
 
     // Parse schema JSON to get rich field types
@@ -2941,14 +2701,32 @@ collections.get("/:collection/new-record", async (c) => {
       }
     } catch (e) {}
 
-    const nonAuthColumns = isAuthCollection
-      ? columns.filter(
-          (col) => !["username", "email", "verified"].includes(col.column_name),
-        )
-      : columns;
+    const nonAuthColumns = isSystemUsers
+      ? columns.filter((col) => col.column_name !== "email")
+      : isAuthCollection
+        ? columns.filter(
+            (col) =>
+              !["username", "email", "verified"].includes(col.column_name),
+          )
+        : columns;
 
-    const authFieldsHtml = isAuthCollection
+    const authFieldsHtml = isSystemUsers
       ? `
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-1">email <span class="text-xs text-muted-foreground/70">(required)</span></label>
+          <input type="email" name="email" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-1">password <span class="text-xs text-muted-foreground/70">(min 8 chars)</span></label>
+          <input type="password" name="password" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-1">passwordConfirm</label>
+          <input type="password" name="passwordConfirm" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
+        </div>
+      `
+      : isAuthCollection
+        ? `
         ${
           authMethod === "username" || authMethod === "both"
             ? `<div>
@@ -2981,7 +2759,7 @@ collections.get("/:collection/new-record", async (c) => {
           <input type="password" name="passwordConfirm" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
         </div>
       `
-      : "";
+        : "";
 
     const fieldsHtml = nonAuthColumns
       .map((col) => {
@@ -3078,8 +2856,10 @@ collections.get("/:collection/new-record", async (c) => {
       </div>
     `);
   } catch (err: any) {
+    console.error("Load form error:", err);
     return c.html(
-      `<div class="text-red-500 p-4">Error loading form: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>`,
+      `<div class="text-red-500 p-4">Error loading form: Internal server error</div>`,
+      500,
     );
   }
 });
@@ -3090,22 +2870,34 @@ collections.get("/:collection/records/:id/edit", async (c) => {
   const recordId = c.req.param("id");
 
   try {
-    const meta =
+    const metaRows =
       await sql`SELECT type, schema, oauth2 FROM _collections WHERE name = ${collectionName} LIMIT 1`;
-    if (meta.length === 0) {
+    const isSystemUsers = collectionName === "_users";
+    if (metaRows.length === 0 && !isSystemUsers) {
       return c.html(
         `<div class="text-red-500 p-4">Collection not found.</div>`,
+        404,
       );
     }
+    const meta =
+      metaRows.length > 0
+        ? metaRows
+        : [{ type: "base", schema: null, oauth2: null }];
     if (meta[0].type === "view") {
-      return c.html(`<div class="text-red-500 p-4">Views are read only.</div>`);
+      return c.html(
+        `<div class="text-red-500 p-4">Views are read only.</div>`,
+        405,
+      );
     }
 
     const recordRes = await sql`
       SELECT * FROM ${sql(collectionName)} WHERE id = ${recordId} LIMIT 1
     `;
     if (recordRes.length === 0) {
-      return c.html(`<div class="text-red-500 p-4">Record not found.</div>`);
+      return c.html(
+        `<div class="text-red-500 p-4">Record not found.</div>`,
+        404,
+      );
     }
 
     const record = recordRes[0];
@@ -3166,14 +2958,55 @@ collections.get("/:collection/records/:id/edit", async (c) => {
       editFieldSnapshotEntries.push([name, String(value ?? "")]);
     };
 
-    const nonAuthColumns = isAuthCollection
-      ? columns.filter(
-          (col) => !["username", "email", "verified"].includes(col.column_name),
-        )
-      : columns;
+    const currentAdminRecord = isSystemUsers
+      ? await getCurrentAdminRecord(c)
+      : null;
+    const canManageOwnership = currentAdminRecord?.owner === true;
+    const canEditOwnPassword =
+      isSystemUsers && currentAdminRecord?.id === record.id;
+    const canEditAnySuperadminPassword =
+      isSystemUsers && currentAdminRecord?.owner === true;
+    const isCurrentOwner = isSystemUsers && record.owner === true;
+    const canTransferOwnership =
+      isSystemUsers && canManageOwnership && !isCurrentOwner;
 
-    const authFieldsHtml = isAuthCollection
+    const nonAuthColumns = isSystemUsers
+      ? columns.filter(
+          (col) =>
+            !["username", "email", "verified", "owner"].includes(
+              col.column_name,
+            ),
+        )
+      : isAuthCollection
+        ? columns.filter(
+            (col) =>
+              !["username", "email", "verified"].includes(col.column_name),
+          )
+        : columns;
+
+    const authFieldsHtml = isSystemUsers
       ? `
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-1">email <span class="text-xs text-muted-foreground/70">(required)</span></label>
+          <div class="flex flex-wrap items-center gap-2">
+            <input type="email" name="email" value="${escapeHtml(record.email || "")}" class="min-w-0 flex-1 h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          </div>
+        </div>
+        ${
+          canEditOwnPassword || canEditAnySuperadminPassword
+            ? `<div>
+          <label class="block text-sm font-medium text-foreground mb-1">password <span class="text-xs text-muted-foreground/70">(leave blank to keep current)</span></label>
+          <input type="password" name="password" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Leave blank to keep current password">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-1">passwordConfirm</label>
+          <input type="password" name="passwordConfirm" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Confirm new password">
+        </div>`
+            : `<div class="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">Password can only be changed by the matching superadmin or the current owner.</div>`
+        }
+      `
+      : isAuthCollection
+        ? `
         ${
           authMethod === "username" || authMethod === "both"
             ? `<div>
@@ -3203,7 +3036,7 @@ collections.get("/:collection/records/:id/edit", async (c) => {
           <input type="password" name="passwordConfirm" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Confirm new password">
         </div>
       `
-      : "";
+        : "";
 
     const fieldsHtml = nonAuthColumns
       .map((col) => {
@@ -3384,6 +3217,11 @@ collections.get("/:collection/records/:id/edit", async (c) => {
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3M4 7h16"></path>
                 </svg>
               </button>
+              ${
+                canTransferOwnership
+                  ? `<button type="submit" name="transfer_owner" value="true" class="inline-flex items-center justify-center rounded-md border border-primary/20 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary/15">Transfer Ownership</button>`
+                  : ""
+              }
               <button type="button" onclick="window.closeDrawer()" class="px-4 py-2 hover:bg-muted rounded-md text-sm font-medium transition">Cancel</button>
               <button id="update-record-btn" type="submit" disabled class="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-2 rounded-md text-sm font-medium transition shadow-sm disabled:pointer-events-none disabled:opacity-50">Update Record</button>
             </div>
@@ -3392,8 +3230,10 @@ collections.get("/:collection/records/:id/edit", async (c) => {
       </div>
     `);
   } catch (err: any) {
+    console.error("Load record editor error:", err);
     return c.html(
-      `<div class="text-red-500 p-4">Error loading record editor: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>`,
+      `<div class="text-red-500 p-4">Error loading record editor: Internal server error</div>`,
+      500,
     );
   }
 });
@@ -3402,6 +3242,7 @@ collections.post("/:collection/records", async (c) => {
   const collectionsBase = getCollectionsBasePath(c);
   const collectionName = c.req.param("collection");
   const body = await c.req.parseBody();
+  const isSystemUsers = isUsersCollection(collectionName);
 
   try {
     const metaInfo =
@@ -3427,6 +3268,174 @@ collections.post("/:collection/records", async (c) => {
           : metaInfo[0].schema;
     }
 
+    if (isSystemUsers) {
+      const email = String(body.email || "").trim();
+      const password = String(body.password || "");
+      const passwordConfirm = String(body.passwordConfirm || "");
+
+      if (!email) {
+        return htmxErrorResponse("email is required for superadmins.");
+      }
+      if (!password || password.length < 8) {
+        return htmxErrorResponse(
+          "Password is required and must be at least 8 characters.",
+        );
+      }
+      if (password !== passwordConfirm) {
+        return htmxErrorResponse("Password and passwordConfirm must match.");
+      }
+
+      const hashedPassword = await Bun.password.hash(password);
+      const result = await sql`
+        INSERT INTO _users (email, password, owner)
+        VALUES (${email}, ${hashedPassword}, FALSE)
+        RETURNING id
+      `;
+
+      return c.html(`
+        <script>
+          showToast("Superadmin created.", "success");
+          setTimeout(() => {
+            if (window.htmx && typeof window.htmx.ajax === 'function') {
+              window.htmx.ajax('GET', window.collectionRecordsUrl || '${collectionsBase}/${collectionName}/records', '#main-content');
+              return;
+            }
+            window.location.reload();
+          }, 10);
+        </script>
+      `);
+    }
+
+    const isBlankValue = (value: any) =>
+      value === undefined || value === null || String(value).trim() === "";
+
+    const validateFieldValue = (fieldDef: any, fieldName: string) => {
+      const rawValue = body[fieldName];
+      const hasValue = Object.prototype.hasOwnProperty.call(body, fieldName);
+
+      if (fieldDef.required && (!hasValue || isBlankValue(rawValue))) {
+        throw new Error(`Field "${fieldName}" is required.`);
+      }
+
+      if (!hasValue || isBlankValue(rawValue)) return;
+
+      const fieldType = String(fieldDef.type || "text").toLowerCase();
+      const stringValue = String(rawValue);
+
+      switch (fieldType) {
+        case "number": {
+          const numericValue = Number(rawValue);
+          if (!Number.isFinite(numericValue)) {
+            throw new Error(`Field "${fieldName}" must be a valid number.`);
+          }
+          if (fieldDef.nonzero && numericValue === 0) {
+            throw new Error(`Field "${fieldName}" must be non-zero.`);
+          }
+          if (
+            fieldDef.min !== undefined &&
+            fieldDef.min !== null &&
+            fieldDef.min !== ""
+          ) {
+            const minValue = Number(fieldDef.min);
+            if (numericValue < minValue) {
+              throw new Error(
+                `Field "${fieldName}" must be at least ${minValue}.`,
+              );
+            }
+          }
+          if (
+            fieldDef.max !== undefined &&
+            fieldDef.max !== null &&
+            fieldDef.max !== ""
+          ) {
+            const maxValue = Number(fieldDef.max);
+            if (numericValue > maxValue) {
+              throw new Error(
+                `Field "${fieldName}" must be at most ${maxValue}.`,
+              );
+            }
+          }
+          break;
+        }
+        case "email": {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(stringValue)) {
+            throw new Error(`Field "${fieldName}" must be a valid email.`);
+          }
+          break;
+        }
+        case "url": {
+          try {
+            new URL(stringValue);
+          } catch {
+            throw new Error(`Field "${fieldName}" must be a valid URL.`);
+          }
+          break;
+        }
+        case "boolean": {
+          if (stringValue !== "true" && stringValue !== "false") {
+            throw new Error(`Field "${fieldName}" must be a boolean.`);
+          }
+          break;
+        }
+        case "date":
+        case "datetime": {
+          if (isNaN(Date.parse(stringValue))) {
+            throw new Error(`Field "${fieldName}" must be a valid date.`);
+          }
+          break;
+        }
+        case "date_only": {
+          const format = fieldDef.date_format || "YYYY-MM-DD";
+          if (
+            format === "YYYY-MM-DD" &&
+            !/^\d{4}-\d{2}-\d{2}$/.test(stringValue)
+          ) {
+            throw new Error(
+              `Field "${fieldName}" must be in YYYY-MM-DD format.`,
+            );
+          }
+          break;
+        }
+        case "json":
+        case "jsonb": {
+          try {
+            JSON.parse(stringValue);
+          } catch {
+            throw new Error(`Field "${fieldName}" must be valid JSON.`);
+          }
+          break;
+        }
+        case "uuid":
+        case "relation": {
+          const uuidRegex =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if (!uuidRegex.test(stringValue)) {
+            throw new Error(`Field "${fieldName}" must be a valid UUID.`);
+          }
+          break;
+        }
+        default: {
+          if (fieldDef.regex && String(fieldDef.regex).trim()) {
+            const regex = new RegExp(fieldDef.regex);
+            if (!regex.test(stringValue)) {
+              throw new Error(
+                `Field "${fieldName}" does not match the required pattern.`,
+              );
+            }
+          }
+        }
+      }
+    };
+
+    const cleanBody: Record<string, any> = {};
+    const finalKeys: string[] = [];
+    const keys = Object.keys(body).filter((k) => body[k] !== "");
+
+    if (keys.length === 0) {
+      return c.json({ error: "Empty payload" }, 422);
+    }
+
     const isAuthCollection = metaInfo.length > 0 && metaInfo[0].type === "auth";
     let authMethod = "email";
     if (isAuthCollection && metaInfo[0].oauth2) {
@@ -3439,19 +3448,104 @@ collections.post("/:collection/records", async (c) => {
       } catch (e) {}
     }
 
-    const keys = Object.keys(body).filter((k) => body[k] !== "");
-    if (keys.length === 0) {
-      c.header(
-        "HX-Trigger",
-        JSON.stringify({
-          "show-toast": { message: "Empty payload", type: "error" },
-        }),
-      );
-      return c.json({ error: "Empty payload" }, 422);
+    for (const fieldDef of definedSchema) {
+      if (!fieldDef || !fieldDef.name) continue;
+      if (fieldDef.system || fieldDef.name === "id") {
+        continue;
+      }
+      if (fieldDef.type === "password" || fieldDef.name === "passwordConfirm") {
+        continue;
+      }
+
+      if (fieldDef.type === "geolocation") {
+        const latKey = `${fieldDef.name}_lat`;
+        const lonKey = `${fieldDef.name}_lon`;
+        const hasLat = Object.prototype.hasOwnProperty.call(body, latKey);
+        const hasLon = Object.prototype.hasOwnProperty.call(body, lonKey);
+        const latValue = body[latKey];
+        const lonValue = body[lonKey];
+
+        if (
+          fieldDef.required &&
+          (!hasLat ||
+            !hasLon ||
+            isBlankValue(latValue) ||
+            isBlankValue(lonValue))
+        ) {
+          throw new Error(`Field "${fieldDef.name}" is required.`);
+        }
+
+        if (
+          hasLat &&
+          !isBlankValue(latValue) &&
+          !Number.isFinite(Number(latValue))
+        ) {
+          throw new Error(
+            `Field "${fieldDef.name}" latitude must be a valid number.`,
+          );
+        }
+        if (
+          hasLon &&
+          !isBlankValue(lonValue) &&
+          !Number.isFinite(Number(lonValue))
+        ) {
+          throw new Error(
+            `Field "${fieldDef.name}" longitude must be a valid number.`,
+          );
+        }
+        continue;
+      }
+
+      validateFieldValue(fieldDef, fieldDef.name);
     }
 
-    const cleanBody: Record<string, any> = {};
-    const finalKeys: string[] = [];
+    if (isAuthCollection) {
+      const password = (body.password as string) || "";
+      const passwordConfirm = (body.passwordConfirm as string) || "";
+
+      if (!password || password.length < 8) {
+        return htmxErrorResponse(
+          "Password is required and must be at least 8 characters.",
+        );
+      }
+      if (password !== passwordConfirm) {
+        return htmxErrorResponse("Password and passwordConfirm must match.");
+      }
+
+      if (authMethod === "username" || authMethod === "both") {
+        if (isBlankValue(body.username)) {
+          return htmxErrorResponse(
+            "username is required for this auth collection.",
+          );
+        }
+      } else {
+        delete cleanBody.username;
+      }
+
+      if (authMethod === "email" || authMethod === "both") {
+        if (isBlankValue(body.email)) {
+          return htmxErrorResponse(
+            "email is required for this auth collection.",
+          );
+        }
+      } else {
+        delete cleanBody.email;
+      }
+
+      cleanBody.verified = body.verified === "true";
+      const hashResult =
+        await sql`SELECT crypt(${password}, gen_salt('bf')) as hash`;
+      cleanBody.password_hash = hashResult[0].hash;
+      delete cleanBody.password;
+      delete cleanBody.passwordConfirm;
+
+      if (!finalKeys.includes("verified")) finalKeys.push("verified");
+      if (!finalKeys.includes("password_hash")) finalKeys.push("password_hash");
+      ["password", "passwordConfirm"].forEach((k) => {
+        const idx = finalKeys.indexOf(k);
+        if (idx > -1) finalKeys.splice(idx, 1);
+      });
+    }
 
     // Group geolocation keys properly
     keys.forEach((k) => {
@@ -3483,6 +3577,9 @@ collections.post("/:collection/records", async (c) => {
         }
         cleanBody[k] = val;
         finalKeys.push(k);
+      } else if (fieldDef && shouldTrimTextInput(fieldDef)) {
+        cleanBody[k] = normalizeTextInputValue(fieldDef, body[k]);
+        finalKeys.push(k);
       } else if (
         columnType.includes("timestamp") &&
         typeof body[k] === "string" &&
@@ -3510,56 +3607,6 @@ collections.post("/:collection/records", async (c) => {
       if (idx > -1) finalKeys.splice(idx, 1);
     }
 
-    if (isAuthCollection) {
-      const password = (body.password as string) || "";
-      const passwordConfirm = (body.passwordConfirm as string) || "";
-
-      if (!password || password.length < 8) {
-        return c.html(
-          `<script>showToast(${JSON.stringify("Password is required and must be at least 8 characters.")}, "error");</script>`,
-        );
-      }
-      if (password !== passwordConfirm) {
-        return c.html(
-          `<script>showToast(${JSON.stringify("Password and passwordConfirm must match.")}, "error");</script>`,
-        );
-      }
-
-      if (authMethod === "username" || authMethod === "both") {
-        if (!cleanBody.username) {
-          return c.html(
-            `<script>showToast(${JSON.stringify("username is required for this auth collection.")}, "error");</script>`,
-          );
-        }
-      } else {
-        delete cleanBody.username;
-      }
-
-      if (authMethod === "email" || authMethod === "both") {
-        if (!cleanBody.email) {
-          return c.html(
-            `<script>showToast(${JSON.stringify("email is required for this auth collection.")}, "error");</script>`,
-          );
-        }
-      } else {
-        delete cleanBody.email;
-      }
-
-      cleanBody.verified = body.verified === "true";
-      const hashResult =
-        await sql`SELECT crypt(${password}, gen_salt('bf')) as hash`;
-      cleanBody.password_hash = hashResult[0].hash;
-      delete cleanBody.password;
-      delete cleanBody.passwordConfirm;
-
-      if (!finalKeys.includes("verified")) finalKeys.push("verified");
-      if (!finalKeys.includes("password_hash")) finalKeys.push("password_hash");
-      ["password", "passwordConfirm"].forEach((k) => {
-        const idx = finalKeys.indexOf(k);
-        if (idx > -1) finalKeys.splice(idx, 1);
-      });
-    }
-
     const result = await sql`
       INSERT INTO ${sql(collectionName)} ${sql(cleanBody, finalKeys as any)}
       RETURNING id
@@ -3567,7 +3614,7 @@ collections.post("/:collection/records", async (c) => {
 
     return c.html(`
       <script>
-        showToast("Record created: ${result[0].id}", "success");
+        showToast("Record created.", "success");
         setTimeout(() => {
           if (window.htmx && typeof window.htmx.ajax === 'function') {
             window.htmx.ajax('GET', window.collectionRecordsUrl || '${collectionsBase}/${collectionName}/records', '#main-content');
@@ -3582,9 +3629,7 @@ collections.post("/:collection/records", async (c) => {
       process.env.NODE_ENV === "production"
         ? "Internal server error"
         : err.message;
-    return c.html(
-      `<script>showToast(${JSON.stringify("Error creating record: " + errMsg)}, "error");</script>`,
-    );
+    return htmxErrorResponse(`Error creating record: ${errMsg}`);
   }
 });
 
@@ -3595,29 +3640,113 @@ collections.post("/:collection/records/:id", async (c) => {
   const body = await c.req.parseBody();
 
   try {
-    const metaInfo =
+    const metaRows =
       await sql`SELECT type, schema, oauth2 FROM _collections WHERE name = ${collectionName} LIMIT 1`;
-    if (metaInfo.length === 0) {
-      return c.html(
-        `<script>showToast("Collection not found.", "error");</script>`,
-      );
+    const isSystemUsers = collectionName === "_users";
+    if (metaRows.length === 0 && !isSystemUsers) {
+      return htmxErrorResponse("Collection not found.");
     }
+    const metaInfo =
+      metaRows.length > 0
+        ? metaRows
+        : [{ type: "base", schema: null, oauth2: null }];
     if (metaInfo[0].type === "view") {
-      return c.html(
-        `<script>showToast("Views are read only.", "error");</script>`,
-      );
+      return htmxErrorResponse("Views are read only.");
     }
 
     const existingRows = await sql`
       SELECT * FROM ${sql(collectionName)} WHERE id = ${recordId} LIMIT 1
     `;
     if (existingRows.length === 0) {
-      return c.html(
-        `<script>showToast("Record not found.", "error");</script>`,
-      );
+      return htmxErrorResponse("Record not found.");
     }
 
     const existingRecord = existingRows[0];
+    if (isSystemUsers) {
+      const currentAdminRecord = await getCurrentAdminRecord(c);
+      const currentAdminId = currentAdminRecord?.id || null;
+      const currentAdminOwns = currentAdminRecord?.owner === true;
+      const nextEmail = String(body.email || "").trim();
+      const requestedPassword = String(body.password || "");
+      const requestedPasswordConfirm = String(body.passwordConfirm || "");
+      const wantsOwnership = body.transfer_owner === "true";
+
+      if (requestedPassword || requestedPasswordConfirm) {
+        if (
+          !currentAdminId ||
+          (recordId !== currentAdminId && !currentAdminOwns)
+        ) {
+          return htmxErrorResponse(
+            "You can only change your own password unless you are the current owner.",
+            403,
+          );
+        }
+        if (!requestedPassword || requestedPassword.length < 8) {
+          return htmxErrorResponse(
+            "Password must be at least 8 characters when updated.",
+          );
+        }
+        if (requestedPassword !== requestedPasswordConfirm) {
+          return htmxErrorResponse("Password and passwordConfirm must match.");
+        }
+      }
+
+      if (wantsOwnership && !currentAdminOwns) {
+        return htmxErrorResponse(
+          "Only the current owner can assign ownership.",
+          403,
+        );
+      }
+
+      const escapeSqlLiteral = (value: any) => {
+        if (value === null || value === undefined) return "NULL";
+        if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+        return `'${String(value).replace(/'/g, "''")}'`;
+      };
+
+      const assignments: string[] = [];
+      if (nextEmail) {
+        assignments.push(`"email" = ${escapeSqlLiteral(nextEmail)}`);
+      }
+
+      if (requestedPassword) {
+        const hashResult = await sql`
+          SELECT crypt(${requestedPassword}, gen_salt('bf')) as hash
+        `;
+        assignments.push(
+          `"password" = ${escapeSqlLiteral(hashResult[0].hash)}`,
+        );
+      }
+
+      if (assignments.length > 0) {
+        await sql.unsafe(
+          `UPDATE _users SET ${assignments.join(", ")} WHERE id = ${escapeSqlLiteral(recordId)}`,
+        );
+      }
+
+      if (wantsOwnership) {
+        await sql`UPDATE _users SET owner = (id = ${recordId})`;
+      }
+
+      if (assignments.length === 0 && !wantsOwnership) {
+        return htmxErrorResponse("No changes to save.", 409);
+      }
+
+      return c.html(`
+        <script>
+          showToast("Superadmin updated.", "success");
+          setTimeout(() => {
+            document.getElementById('drawer-container').innerHTML = '';
+            if (window.htmx && typeof window.htmx.ajax === 'function') {
+              window.htmx.ajax('GET', window.collectionRecordsUrl || '${collectionsBase}/${collectionName}/records', '#main-content');
+              return;
+            }
+            window.location.reload();
+          }, 10);
+        </script>
+      `);
+    }
+
     const configuredTimeZone = await getConfiguredTimeZone();
     const tableColumns = await sql`
       SELECT column_name, data_type
@@ -3638,6 +3767,180 @@ collections.post("/:collection/records/:id", async (c) => {
         typeof metaInfo[0].schema === "string"
           ? JSON.parse(metaInfo[0].schema)
           : metaInfo[0].schema;
+    }
+
+    const isBlankValue = (value: any) =>
+      value === undefined || value === null || String(value).trim() === "";
+
+    const validateFieldValue = (fieldDef: any, fieldName: string) => {
+      const hasValue = Object.prototype.hasOwnProperty.call(body, fieldName);
+      const rawValue = body[fieldName];
+
+      if (fieldDef.required && (!hasValue || isBlankValue(rawValue))) {
+        throw new Error(`Field "${fieldName}" is required.`);
+      }
+
+      if (!hasValue || isBlankValue(rawValue)) return;
+
+      const fieldType = String(fieldDef.type || "text").toLowerCase();
+      const stringValue = String(rawValue);
+
+      switch (fieldType) {
+        case "number": {
+          const numericValue = Number(rawValue);
+          if (!Number.isFinite(numericValue)) {
+            throw new Error(`Field "${fieldName}" must be a valid number.`);
+          }
+          if (fieldDef.nonzero && numericValue === 0) {
+            throw new Error(`Field "${fieldName}" must be non-zero.`);
+          }
+          if (
+            fieldDef.min !== undefined &&
+            fieldDef.min !== null &&
+            fieldDef.min !== ""
+          ) {
+            const minValue = Number(fieldDef.min);
+            if (numericValue < minValue) {
+              throw new Error(
+                `Field "${fieldName}" must be at least ${minValue}.`,
+              );
+            }
+          }
+          if (
+            fieldDef.max !== undefined &&
+            fieldDef.max !== null &&
+            fieldDef.max !== ""
+          ) {
+            const maxValue = Number(fieldDef.max);
+            if (numericValue > maxValue) {
+              throw new Error(
+                `Field "${fieldName}" must be at most ${maxValue}.`,
+              );
+            }
+          }
+          break;
+        }
+        case "email": {
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(stringValue)) {
+            throw new Error(`Field "${fieldName}" must be a valid email.`);
+          }
+          break;
+        }
+        case "url": {
+          try {
+            new URL(stringValue);
+          } catch {
+            throw new Error(`Field "${fieldName}" must be a valid URL.`);
+          }
+          break;
+        }
+        case "boolean": {
+          if (stringValue !== "true" && stringValue !== "false") {
+            throw new Error(`Field "${fieldName}" must be a boolean.`);
+          }
+          break;
+        }
+        case "date":
+        case "datetime": {
+          if (isNaN(Date.parse(stringValue))) {
+            throw new Error(`Field "${fieldName}" must be a valid date.`);
+          }
+          break;
+        }
+        case "date_only": {
+          const format = fieldDef.date_format || "YYYY-MM-DD";
+          if (
+            format === "YYYY-MM-DD" &&
+            !/^\d{4}-\d{2}-\d{2}$/.test(stringValue)
+          ) {
+            throw new Error(
+              `Field "${fieldName}" must be in YYYY-MM-DD format.`,
+            );
+          }
+          break;
+        }
+        case "json":
+        case "jsonb": {
+          try {
+            JSON.parse(stringValue);
+          } catch {
+            throw new Error(`Field "${fieldName}" must be valid JSON.`);
+          }
+          break;
+        }
+        case "uuid":
+        case "relation": {
+          const uuidRegex =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          if (!uuidRegex.test(stringValue)) {
+            throw new Error(`Field "${fieldName}" must be a valid UUID.`);
+          }
+          break;
+        }
+        default: {
+          if (fieldDef.regex && String(fieldDef.regex).trim()) {
+            const regex = new RegExp(fieldDef.regex);
+            if (!regex.test(stringValue)) {
+              throw new Error(
+                `Field "${fieldName}" does not match the required pattern.`,
+              );
+            }
+          }
+        }
+      }
+    };
+
+    for (const fieldDef of definedSchema) {
+      if (!fieldDef || !fieldDef.name) continue;
+      if (
+        fieldDef.system ||
+        fieldDef.type === "password" ||
+        fieldDef.name === "passwordConfirm"
+      ) {
+        continue;
+      }
+
+      if (fieldDef.type === "geolocation") {
+        const latKey = `${fieldDef.name}_lat`;
+        const lonKey = `${fieldDef.name}_lon`;
+        const hasLat = Object.prototype.hasOwnProperty.call(body, latKey);
+        const hasLon = Object.prototype.hasOwnProperty.call(body, lonKey);
+        const latValue = body[latKey];
+        const lonValue = body[lonKey];
+
+        if (
+          fieldDef.required &&
+          (!hasLat ||
+            !hasLon ||
+            isBlankValue(latValue) ||
+            isBlankValue(lonValue))
+        ) {
+          throw new Error(`Field "${fieldDef.name}" is required.`);
+        }
+
+        if (
+          hasLat &&
+          !isBlankValue(latValue) &&
+          !Number.isFinite(Number(latValue))
+        ) {
+          throw new Error(
+            `Field "${fieldDef.name}" latitude must be a valid number.`,
+          );
+        }
+        if (
+          hasLon &&
+          !isBlankValue(lonValue) &&
+          !Number.isFinite(Number(lonValue))
+        ) {
+          throw new Error(
+            `Field "${fieldDef.name}" longitude must be a valid number.`,
+          );
+        }
+        continue;
+      }
+
+      validateFieldValue(fieldDef, fieldDef.name);
     }
 
     const isAuthCollection = metaInfo.length > 0 && metaInfo[0].type === "auth";
@@ -3689,6 +3992,9 @@ collections.post("/:collection/records/:id", async (c) => {
         }
         cleanBody[k] = val;
         finalKeys.push(k);
+      } else if (fieldDef && shouldTrimTextInput(fieldDef)) {
+        cleanBody[k] = normalizeTextInputValue(fieldDef, body[k]);
+        finalKeys.push(k);
       } else if (
         columnType.includes("timestamp") &&
         typeof body[k] === "string" &&
@@ -3717,14 +4023,12 @@ collections.post("/:collection/records/:id", async (c) => {
 
       if (password) {
         if (password.length < 8) {
-          return c.html(
-            `<script>showToast(${JSON.stringify("Password must be at least 8 characters when updated.")}, "error");</script>`,
+          return htmxErrorResponse(
+            "Password must be at least 8 characters when updated.",
           );
         }
         if (password !== passwordConfirm) {
-          return c.html(
-            `<script>showToast(${JSON.stringify("Password and passwordConfirm must match.")}, "error");</script>`,
-          );
+          return htmxErrorResponse("Password and passwordConfirm must match.");
         }
 
         const hashResult =
@@ -3796,9 +4100,7 @@ collections.post("/:collection/records/:id", async (c) => {
       );
 
     if (updateAssignments.length === 0) {
-      return c.html(
-        `<script>showToast("No changes to save.", "info");</script>`,
-      );
+      return htmxErrorResponse("No changes to save.", 409);
     }
 
     await sql.unsafe(
@@ -3823,9 +4125,7 @@ collections.post("/:collection/records/:id", async (c) => {
       process.env.NODE_ENV === "production"
         ? "Internal server error"
         : err.message;
-    return c.html(
-      `<script>showToast(${JSON.stringify("Error updating record: " + errMsg)}, "error");</script>`,
-    );
+    return htmxErrorResponse(`Error updating record: ${errMsg}`);
   }
 });
 
@@ -3840,12 +4140,32 @@ collections.post("/:collection/records/:id/delete", async (c) => {
     if (metaInfo.length === 0) {
       return c.html(
         `<script>showToast("Collection not found.", "error");</script>`,
+        404,
       );
     }
     if (metaInfo[0].type === "view") {
       return c.html(
         `<script>showToast("Views are read only.", "error");</script>`,
+        405,
       );
+    }
+
+    if (isUsersCollection(collectionName)) {
+      const targetRows = await sql`
+        SELECT id, owner FROM _users WHERE id = ${recordId} LIMIT 1
+      `;
+      if (targetRows.length === 0) {
+        return c.html(
+          `<script>showToast("Record not found.", "error");</script>`,
+          404,
+        );
+      }
+      if (targetRows[0].owner === true) {
+        return c.html(
+          `<script>showToast("Transfer ownership before deleting the current owner.", "error");</script>`,
+          403,
+        );
+      }
     }
 
     const deleted = await sql`
@@ -3855,6 +4175,7 @@ collections.post("/:collection/records/:id/delete", async (c) => {
     if (deleted.length === 0) {
       return c.html(
         `<script>showToast("Record not found.", "error");</script>`,
+        404,
       );
     }
 
@@ -3892,7 +4213,10 @@ collections.get("/:collection/settings", async (c) => {
     const meta =
       await sql`SELECT * FROM _collections WHERE name = ${collectionName} LIMIT 1`;
     if (meta.length === 0)
-      return c.html(`<div class="text-red-500 p-4">Settings not found!</div>`);
+      return c.html(
+        `<div class="text-red-500 p-4">Settings not found!</div>`,
+        404,
+      );
 
     const col = meta[0];
     if (typeof col.oauth2 === "string") {
@@ -4424,6 +4748,7 @@ collections.get("/:collection/settings", async (c) => {
               min: row.querySelector('.schema-min')?.value || '',
               max: row.querySelector('.schema-max')?.value || '',
               regex: row.querySelector('.schema-regex')?.value || '',
+              trim_input: !!row.querySelector('.schema-trim-input')?.checked,
             };
           });
 
@@ -4574,6 +4899,10 @@ collections.get("/:collection/settings", async (c) => {
               
               <div class="schema-text-settings">
                  <input type="text" class="schema-regex flex h-9 w-full rounded border border-input bg-background px-3 py-1 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring font-mono" placeholder="Regex validation pattern" value="\${s.regex || ''}">
+                 <div class="mt-3 flex items-center space-x-2 schema-trim-wrapper hidden">
+                   <input type="checkbox" class="schema-trim-input h-4 w-4 rounded border-input" \${s.trim_input ? "checked" : ""}>
+                   <span class="text-sm font-medium">Trim Input</span>
+                 </div>
               </div>
             </div>
             \` : ''}
@@ -4598,11 +4927,15 @@ collections.get("/:collection/settings", async (c) => {
            const typeSelect = row.querySelector('.schema-type');
            const numSettings = row.querySelector('.schema-number-settings');
            const textSettings = row.querySelector('.schema-text-settings');
+           const trimWrapper = row.querySelector('.schema-trim-wrapper');
            if(!typeSelect || !numSettings || !textSettings) return;
 
            const type = typeSelect.value;
            numSettings.style.display = type === 'number' ? 'flex' : 'none';
-           textSettings.style.display = type === 'text' ? 'block' : 'none';
+           textSettings.style.display = type === 'text' || type === 'richtext' ? 'block' : 'none';
+           if (trimWrapper) {
+             trimWrapper.style.display = type === 'text' || type === 'richtext' ? 'flex' : 'none';
+           }
         };
 
         window.addIndex = function() {
@@ -4696,6 +5029,9 @@ collections.get("/:collection/settings", async (c) => {
                  sf.max = r.querySelector('.schema-max')?.value || '';
              } else if (sf.type === 'text') {
                  sf.regex = r.querySelector('.schema-regex')?.value || '';
+               sf.trim_input = r.querySelector('.schema-trim-input')?.checked || false;
+             } else if (sf.type === 'richtext') {
+               sf.trim_input = r.querySelector('.schema-trim-input')?.checked || false;
              }
 
              data.push(sf);
@@ -4738,8 +5074,10 @@ collections.get("/:collection/settings", async (c) => {
       </script>
     `);
   } catch (err: any) {
+    console.error("Record save error:", err);
     return c.html(
-      `<div class="text-red-500 p-4">Error: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>`,
+      `<div class="text-red-500 p-4">Error: Internal server error</div>`,
+      500,
     );
   }
 });
@@ -4794,6 +5132,12 @@ collections.post("/:collection/settings", async (c) => {
       if (schemaPayloadRaw.trim()) {
         newSchema = JSON.parse(schemaPayloadRaw);
       }
+
+      const cleanUserFields = newSchema.filter((field: any) => !field.system);
+      if (currentMeta[0].type === "base" && cleanUserFields.length === 0) {
+        throw new Error("Base Collection must have at least one custom field.");
+      }
+
       let oldSchema =
         typeof currentMeta[0].schema === "string"
           ? JSON.parse(currentMeta[0].schema)
@@ -4840,6 +5184,8 @@ collections.post("/:collection/settings", async (c) => {
             `ALTER TABLE "${collectionName}" ADD COLUMN "${ns.name}" ${safeType}`,
           );
 
+          await syncFieldSqlConstraints(collectionName, ns, ns.name);
+
           delete ns.isNew;
           delete ns.originalName;
         } else {
@@ -4853,6 +5199,12 @@ collections.post("/:collection/settings", async (c) => {
               `ALTER TABLE "${collectionName}" RENAME COLUMN "${ns.originalName}" TO "${ns.name}"`,
             );
           }
+
+          await syncFieldSqlConstraints(
+            collectionName,
+            ns,
+            oldField?.name || ns.originalName,
+          );
 
           delete ns.originalName;
         }
@@ -4967,9 +5319,7 @@ collections.post("/:collection/settings", async (c) => {
       process.env.NODE_ENV === "production"
         ? "Internal server error"
         : err.message;
-    return c.html(
-      `<script>showToast(${JSON.stringify("Error saving settings: " + errMsg)}, "error");</script>`,
-    );
+    return htmxErrorResponse(`Error saving settings: ${errMsg}`);
   }
 });
 
@@ -5029,8 +5379,10 @@ collections.delete("/:collection", async (c) => {
       </script>
     `);
   } catch (err: any) {
+    console.error("Delete collection error:", err);
     return c.html(
-      `<div class="text-red-500 p-4">Error deleting collection: ${process.env.NODE_ENV === "production" ? "Internal server error" : err.message}</div>`,
+      `<div class="text-red-500 p-4">Error deleting collection: Internal server error</div>`,
+      500,
     );
   }
 });

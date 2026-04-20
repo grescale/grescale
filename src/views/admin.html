@@ -531,6 +531,35 @@
             <span class="block sm:inline"> You are not logged in. Please <a href="/" class="underline text-red-800">log in from the main page</a> first.</span>
           </div>
         `;
+          return;
+        }
+
+        let message = "Request failed.";
+        try {
+          const parsed = JSON.parse(event.detail.xhr.responseText || "{}");
+          if (
+            parsed &&
+            typeof parsed.error === "string" &&
+            parsed.error.trim()
+          ) {
+            message = parsed.error;
+          } else if (
+            typeof event.detail.xhr.responseText === "string" &&
+            event.detail.xhr.responseText.trim()
+          ) {
+            message = event.detail.xhr.responseText.trim();
+          }
+        } catch (error) {
+          if (
+            typeof event.detail.xhr.responseText === "string" &&
+            event.detail.xhr.responseText.trim()
+          ) {
+            message = event.detail.xhr.responseText.trim();
+          }
+        }
+
+        if (window.showToast) {
+          window.showToast(message, "error");
         }
       });
     </script>
@@ -785,8 +814,22 @@
         rows.forEach((row) => {
           const name = row.getAttribute("data-collection-name") || "";
           const isActive = !!activeCollection && name === activeCollection;
-          row.classList.toggle("bg-accent", isActive);
-          row.classList.toggle("text-accent-foreground", isActive);
+          const mainButton = row.querySelector(
+            "button[hx-target='#main-content']",
+          );
+
+          row.classList.toggle("bg-muted", isActive);
+          row.classList.toggle("text-foreground", isActive);
+          row.classList.toggle("hover:bg-muted", !isActive);
+
+          if (mainButton) {
+            mainButton.classList.toggle("bg-muted", isActive);
+            mainButton.classList.toggle("text-foreground", isActive);
+            mainButton.setAttribute(
+              "aria-current",
+              isActive ? "page" : "false",
+            );
+          }
         });
       }
 
@@ -828,6 +871,32 @@
         });
       }
 
+      function refreshActiveUiState() {
+        applyActiveCollectionItem();
+        applyActiveQuickLink();
+      }
+
+      refreshActiveUiState();
+
+      const collectionsList = document.getElementById("collections-list");
+      if (collectionsList) {
+        const collectionsObserver = new MutationObserver(function () {
+          refreshActiveUiState();
+        });
+
+        collectionsObserver.observe(collectionsList, {
+          childList: true,
+          subtree: true,
+        });
+      }
+
+      document.body.addEventListener("htmx:afterSettle", refreshActiveUiState);
+      document.body.addEventListener(
+        "htmx:pushedIntoHistory",
+        refreshActiveUiState,
+      );
+      window.addEventListener("popstate", refreshActiveUiState);
+
       document.body.addEventListener("click", function (event) {
         const quickLink = event.target.closest("[data-quick-link]");
         if (!quickLink) return;
@@ -864,10 +933,17 @@
             ? "border-border text-foreground"
             : "border-red-200 text-red-700";
         toast.className = `transform transition-all duration-300 translate-y-4 opacity-0 bg-card border ${toneClass} px-4 py-3 rounded-lg shadow-sm flex items-center justify-between min-w-[250px]`;
-        toast.innerHTML = `
-          <span class="text-sm font-medium">${message}</span>
-          <button onclick="this.parentElement.remove()" class="ml-4 text-muted-foreground hover:text-foreground">&times;</button>
-        `;
+        const label = document.createElement("span");
+        label.className = "text-sm font-medium";
+        label.textContent = String(message);
+
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "ml-4 text-muted-foreground hover:text-foreground";
+        button.textContent = "×";
+        button.addEventListener("click", () => toast.remove());
+
+        toast.append(label, button);
         container.appendChild(toast);
 
         requestAnimationFrame(() => {
@@ -933,7 +1009,7 @@
 
     <div
       id="toast-container"
-      class="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2"
+      class="fixed bottom-4 left-1/2 z-[9999] flex -translate-x-1/2 flex-col items-center gap-2"
     ></div>
   </body>
 </html>
