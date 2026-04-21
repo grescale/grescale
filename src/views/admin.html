@@ -3,55 +3,67 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Grescale - Admin UI</title>
+    <title>Grescale Admin</title>
+
+    <!-- Resolve theme BEFORE paint to prevent flash -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("grescale-theme");
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          if (saved === "dark" || (!saved && prefersDark)) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
+
     <script src="https://unpkg.com/htmx.org@1.9.11"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+
     <script>
-      document.addEventListener("DOMContentLoaded", () => {
-        lucide.createIcons();
-      });
-      document.addEventListener("htmx:afterSwap", function () {
-        lucide.createIcons();
-      });
+      document.addEventListener("DOMContentLoaded", () => lucide.createIcons());
+      document.addEventListener("htmx:afterSwap", () => lucide.createIcons());
     </script>
 
     <script>
       tailwind.config = {
+        darkMode: "class",
         theme: {
           extend: {
             colors: {
-              border: "hsl(var(--border))",
-              input: "hsl(var(--input))",
-              ring: "hsl(var(--ring))",
-              background: "hsl(var(--background))",
-              foreground: "hsl(var(--foreground))",
+              border:      "hsl(var(--border))",
+              input:       "hsl(var(--input))",
+              ring:        "hsl(var(--ring))",
+              background:  "hsl(var(--background))",
+              foreground:  "hsl(var(--foreground))",
               primary: {
-                DEFAULT: "hsl(var(--primary))",
+                DEFAULT:    "hsl(var(--primary))",
                 foreground: "hsl(var(--primary-foreground))",
               },
               secondary: {
-                DEFAULT: "hsl(var(--secondary))",
+                DEFAULT:    "hsl(var(--secondary))",
                 foreground: "hsl(var(--secondary-foreground))",
               },
               destructive: {
-                DEFAULT: "hsl(var(--destructive))",
+                DEFAULT:    "hsl(var(--destructive))",
                 foreground: "hsl(var(--destructive-foreground))",
               },
               muted: {
-                DEFAULT: "hsl(var(--muted))",
+                DEFAULT:    "hsl(var(--muted))",
                 foreground: "hsl(var(--muted-foreground))",
               },
               accent: {
-                DEFAULT: "hsl(var(--accent))",
+                DEFAULT:    "hsl(var(--accent))",
                 foreground: "hsl(var(--accent-foreground))",
               },
               popover: {
-                DEFAULT: "hsl(var(--popover))",
+                DEFAULT:    "hsl(var(--popover))",
                 foreground: "hsl(var(--popover-foreground))",
               },
               card: {
-                DEFAULT: "hsl(var(--card))",
+                DEFAULT:    "hsl(var(--card))",
                 foreground: "hsl(var(--card-foreground))",
               },
             },
@@ -61,18 +73,7 @@
               sm: "calc(var(--radius) - 4px)",
             },
             fontFamily: {
-              sans: [
-                "Inter",
-                "ui-sans-serif",
-                "system-ui",
-                "-apple-system",
-                "BlinkMacSystemFont",
-                "Segoe UI",
-                "Roboto",
-                "Helvetica Neue",
-                "Arial",
-                "sans-serif",
-              ],
+              sans: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
             },
           },
         },
@@ -80,254 +81,288 @@
     </script>
 
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+      @import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300..700;1,14..32,300..700&display=swap");
+
+      /* ── Light theme ──────────────────────────────────── */
       :root {
-        --background: 0 0% 100%;
-        --foreground: 240 10% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 240 10% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 240 10% 3.9%;
-        --primary: 240 5.9% 10%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 240 4.8% 95.9%;
-        --secondary-foreground: 240 5.9% 10%;
-        --muted: 240 4.8% 95.9%;
-        --muted-foreground: 240 3.8% 46.1%;
-        --accent: 240 4.8% 95.9%;
-        --accent-foreground: 240 5.9% 10%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 240 5.9% 90%;
-        --input: 240 5.9% 90%;
-        --ring: 240 10% 3.9%;
-        --radius: 0.5rem;
+        --background:           220 20% 97%;
+        --foreground:           222 47% 11%;
+        --card:                 0 0% 100%;
+        --card-foreground:      222 47% 11%;
+        --popover:              0 0% 100%;
+        --popover-foreground:   222 47% 11%;
+        --primary:              243 75% 59%;
+        --primary-foreground:   0 0% 100%;
+        --secondary:            220 14% 95%;
+        --secondary-foreground: 222 47% 11%;
+        --muted:                220 14% 95%;
+        --muted-foreground:     220 9% 48%;
+        --accent:               220 14% 94%;
+        --accent-foreground:    222 47% 11%;
+        --destructive:          0 84% 60%;
+        --destructive-foreground: 0 0% 100%;
+        --border:               220 13% 90%;
+        --input:                220 13% 90%;
+        --ring:                 243 75% 59%;
+        --radius:               0.5rem;
+        /* sidebar */
+        --sidebar-bg:           0 0% 100%;
+        --sidebar-border:       220 13% 91%;
+        --sidebar-fg:           222 47% 11%;
+        --sidebar-muted:        220 9% 48%;
       }
+
+      /* ── Dark theme ───────────────────────────────────── */
+      .dark {
+        --background:           224 42% 8%;
+        --foreground:           210 40% 93%;
+        --card:                 224 42% 11%;
+        --card-foreground:      210 40% 93%;
+        --popover:              224 42% 11%;
+        --popover-foreground:   210 40% 93%;
+        --primary:              245 80% 68%;
+        --primary-foreground:   0 0% 100%;
+        --secondary:            224 42% 16%;
+        --secondary-foreground: 210 40% 93%;
+        --muted:                224 42% 15%;
+        --muted-foreground:     215 20% 52%;
+        --accent:               224 42% 17%;
+        --accent-foreground:    210 40% 93%;
+        --destructive:          0 62% 50%;
+        --destructive-foreground: 0 0% 100%;
+        --border:               224 42% 18%;
+        --input:                224 42% 18%;
+        --ring:                 245 80% 68%;
+        /* sidebar — slightly different from background */
+        --sidebar-bg:           224 42% 9.5%;
+        --sidebar-border:       224 42% 16%;
+        --sidebar-fg:           210 40% 93%;
+        --sidebar-muted:        215 20% 52%;
+      }
+
+      /* ── Base ─────────────────────────────────────────── */
+      *, *::before, *::after { box-sizing: border-box; }
+
+      html { height: 100%; }
 
       body {
-        background-color: hsl(var(--background));
+        height: 100%;
+        background: hsl(var(--background));
         color: hsl(var(--foreground));
-        font-family: "Inter", sans-serif;
+        font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        line-height: 1.5;
       }
 
-      .quick-link-btn {
-        width: 100%;
-        height: 2.5rem;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 0.5rem;
-        color: hsl(var(--muted-foreground));
+      /* ── Sidebar nav button ───────────────────────────── */
+      .nav-btn {
+        position: relative;
+        width: 36px; height: 36px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 8px;
+        color: hsl(var(--sidebar-muted));
         background: transparent;
-        transition:
-          background-color 0.18s ease,
-          color 0.18s ease,
-          border-color 0.18s ease;
+        border: none;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+        flex-shrink: 0;
       }
-
-      .quick-link-btn:hover {
+      .nav-btn:hover {
         background: hsl(var(--muted));
         color: hsl(var(--foreground));
       }
+      .nav-btn.active {
+        background: hsl(var(--primary) / 0.14);
+        color: hsl(var(--primary));
+      }
+      .dark .nav-btn.active {
+        background: hsl(var(--primary) / 0.2);
+      }
 
-      .quick-link-btn.active {
+      /* ── Collection list items ────────────────────────── */
+      [data-collection-item] {
+        border-radius: 6px;
+        display: flex; align-items: center; gap: 2px;
+        transition: background 0.1s;
+      }
+      /* The main nav button — matches settings-nav-btn sizing exactly */
+      [data-collection-item] button[hx-target="#main-content"] {
+        flex: 1; min-width: 0;
+        display: flex; align-items: center; gap: 0.5rem;
+        padding: 0.4rem 0.625rem;
+        border-radius: 6px; border: none; cursor: pointer;
+        font-size: 0.8125rem; font-weight: 500; text-align: left;
+        color: hsl(var(--sidebar-muted));
+        background: transparent;
+        transition: background 0.1s, color 0.1s;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      /* Hover — non-active only */
+      [data-collection-item]:not(.bg-muted) button[hx-target="#main-content"]:hover {
         background: hsl(var(--muted));
         color: hsl(var(--foreground));
       }
+      /* Active — primary tint on outer div, primary text on button, persists on hover */
+      [data-collection-item].bg-muted {
+        background: hsl(var(--primary) / 0.1) !important;
+        border-radius: 6px;
+      }
+      [data-collection-item].bg-muted button[hx-target="#main-content"],
+      [data-collection-item].bg-muted button[hx-target="#main-content"]:hover {
+        background: transparent !important;
+        color: hsl(var(--primary)) !important;
+        font-weight: 600;
+      }
 
-      /* HTMX Animations */
+      /* ── Tables (applies to ALL HTMX-loaded content) ─── */
+      table { border-collapse: collapse; width: 100%; }
+
+      thead th {
+        background: hsl(var(--muted));
+        color: hsl(var(--muted-foreground));
+        font-size: 0.6875rem; font-weight: 600;
+        letter-spacing: 0.06em; text-transform: uppercase;
+        padding: 0.625rem 1rem;
+        border-bottom: 1px solid hsl(var(--border));
+        white-space: nowrap; user-select: none;
+        position: sticky; top: 0; z-index: 1;
+      }
+      tbody tr {
+        border-bottom: 1px solid hsl(var(--border));
+        transition: background 0.1s;
+      }
+      tbody tr:last-child { border-bottom: none; }
+      tbody tr:hover { background: hsl(var(--muted) / 0.5); }
+      tbody td {
+        padding: 0.7rem 1rem; font-size: 0.8125rem;
+        color: hsl(var(--foreground)); vertical-align: middle;
+      }
+
+      /* ── Animations ───────────────────────────────────── */
       @keyframes fadeIn {
-        from {
-          opacity: 0;
-        }
-        to {
-          opacity: 1;
-        }
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
       }
-
       @keyframes slideInRight {
-        from {
-          transform: translateX(100%);
-          opacity: 0;
-        }
-        to {
-          transform: translateX(0);
-          opacity: 1;
-        }
+        from { transform: translateX(100%); opacity: 0; }
+        to   { transform: translateX(0);    opacity: 1; }
       }
-
       @keyframes slideOutRight {
-        from {
-          transform: translateX(0);
-          opacity: 1;
-        }
-        to {
-          transform: translateX(100%);
-          opacity: 0;
-        }
+        from { transform: translateX(0);    opacity: 1; }
+        to   { transform: translateX(100%); opacity: 0; }
       }
-
       @keyframes slideInUp {
-        from {
-          transform: translateY(20px);
-          opacity: 0;
-        }
-        to {
-          transform: translateY(0);
-          opacity: 1;
-        }
+        from { transform: translateY(8px); opacity: 0; }
+        to   { transform: translateY(0);   opacity: 1; }
       }
-
       @keyframes fadeOut {
-        from {
-          opacity: 1;
-        }
-        to {
-          opacity: 0;
-        }
+        from { opacity: 1; }
+        to   { opacity: 0; }
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
       }
 
-      /* HTMX Swap Animations */
-      .htmx-swapping {
-        animation: fadeOut 0.15s ease-out;
-      }
+      .htmx-swapping { animation: fadeOut 0.12s ease-out; }
+      .htmx-settling  { animation: fadeIn 0.18s ease-in; }
 
-      .htmx-settling {
-        animation: fadeIn 0.2s ease-in;
-      }
-
-      /* Drawer Animation */
-      #drawer-container {
-        pointer-events: none;
-      }
-
+      #drawer-container { pointer-events: none; }
       #drawer-container [data-drawer-backdrop] {
         pointer-events: auto;
-        animation: fadeIn 0.2s ease-out both;
+        animation: fadeIn 0.18s ease-out both;
       }
-
       #drawer-container [data-drawer-panel] {
         pointer-events: auto;
-        animation: slideInRight 0.3s ease-out both;
+        animation: slideInRight 0.26s cubic-bezier(0.16,1,0.3,1) both;
       }
-
       #drawer-container.is-closing [data-drawer-backdrop] {
-        animation: fadeOut 0.2s ease-in both;
+        animation: fadeOut 0.16s ease-in both;
       }
-
       #drawer-container.is-closing [data-drawer-panel] {
-        animation: slideOutRight 0.25s ease-in both;
+        animation: slideOutRight 0.2s ease-in both;
       }
 
-      #drawer-container.htmx-swapping {
-        animation: fadeOut 0.15s ease-out;
+      #main-content { animation: fadeIn 0.18s ease-out; }
+
+      [data-collection-item] { animation: slideInUp 0.22s ease-out backwards; }
+      [data-collection-item]:nth-child(1)  { animation-delay: 0.03s; }
+      [data-collection-item]:nth-child(2)  { animation-delay: 0.06s; }
+      [data-collection-item]:nth-child(3)  { animation-delay: 0.09s; }
+      [data-collection-item]:nth-child(4)  { animation-delay: 0.12s; }
+      [data-collection-item]:nth-child(5)  { animation-delay: 0.15s; }
+      [data-collection-item]:nth-child(n+6){ animation-delay: 0.18s; }
+
+      /* ── HTMX loading ─────────────────────────────────── */
+      .htmx-indicator { display: none; }
+      .htmx-request .htmx-indicator,
+      .htmx-request.htmx-indicator { display: inline-block; }
+
+      /* ── Scrollbar ────────────────────────────────────── */
+      ::-webkit-scrollbar { width: 5px; height: 5px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb {
+        background: hsl(var(--border));
+        border-radius: 9999px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: hsl(var(--muted-foreground) / 0.4);
       }
 
-      /* Main Content Animation */
-      #main-content {
-        animation: fadeIn 0.25s ease-in;
+      /* ── Focus ────────────────────────────────────────── */
+      :focus-visible {
+        outline: 2px solid hsl(var(--ring));
+        outline-offset: 2px;
       }
 
-      /* Collection Item Animation */
-      [data-collection-item] {
-        animation: slideInUp 0.3s ease-out backwards;
+      /* ── Inputs ───────────────────────────────────────── */
+      input, textarea, select {
+        transition: border-color 0.15s, box-shadow 0.15s;
       }
 
-      [data-collection-item]:nth-child(1) {
-        animation-delay: 0.05s;
-      }
-      [data-collection-item]:nth-child(2) {
-        animation-delay: 0.1s;
-      }
-      [data-collection-item]:nth-child(3) {
-        animation-delay: 0.15s;
-      }
-      [data-collection-item]:nth-child(4) {
-        animation-delay: 0.2s;
-      }
-      [data-collection-item]:nth-child(5) {
-        animation-delay: 0.25s;
-      }
-      [data-collection-item]:nth-child(n + 6) {
-        animation-delay: 0.3s;
-      }
-
-      /* Toast Animation */
-      .toast-notification {
-        animation: slideInUp 0.3s ease-out;
-      }
-
-      /* Form Input Focus Animation */
-      input:focus,
-      textarea:focus,
-      select:focus {
-        animation: none;
-        transition: all 0.2s ease;
-      }
-
-      /* Loading State */
-      .htmx-request .htmx-indicator {
-        display: inline-block;
-      }
-
-      .htmx-request.htmx-indicator {
-        display: inline-block;
-      }
-
-      .htmx-indicator {
-        display: none;
-      }
-
-      /* Button Hover Smooth Transition */
-      button {
-        transition: all 0.2s ease;
-      }
-
-      button:hover {
-        transform: none;
-      }
-
-      /* Smooth Color Transitions */
-      * {
-        transition:
-          background-color 0.2s ease,
-          color 0.2s ease,
-          border-color 0.2s ease;
-      }
-
-      input,
-      textarea,
-      select {
-        transition:
-          background-color 0.15s ease,
-          border-color 0.15s ease;
+      /* ── Separator ────────────────────────────────────── */
+      .sidebar-sep {
+        width: 20px; height: 1px;
+        background: hsl(var(--sidebar-border));
+        margin: 2px auto;
+        flex-shrink: 0;
       }
     </style>
   </head>
-  <body
-    class="bg-[linear-gradient(180deg,hsl(var(--background))_0%,hsl(var(--muted))_100%)] h-screen flex overflow-hidden font-sans text-foreground"
-  >
+
+  <body class="h-screen flex overflow-hidden font-sans antialiased bg-background text-foreground">
+
+    <!-- ══════════════════════════════════════════════════════════
+         LEFT ICON SIDEBAR (56px)
+    ══════════════════════════════════════════════════════════ -->
     <aside
-      class="w-16 bg-background border-r border-border flex flex-col h-full"
+      class="w-14 flex flex-col h-full shrink-0 z-20"
+      style="background: hsl(var(--sidebar-bg)); border-right: 1px solid hsl(var(--sidebar-border));"
     >
-      <div class="h-16 border-b border-border flex items-center justify-center">
+      <!-- Logo -->
+      <div
+        class="h-14 flex items-center justify-center shrink-0"
+        style="border-bottom: 1px solid hsl(var(--sidebar-border));"
+      >
         <div
-          class="w-9 h-9 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm"
+          class="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm select-none"
+          style="background: hsl(var(--primary)); color: hsl(var(--primary-foreground));"
           title="Grescale"
         >
           G
         </div>
       </div>
 
-      <div class="p-2 flex-1 overflow-y-auto flex flex-col gap-1">
+      <!-- Primary nav icons -->
+      <nav class="flex-1 flex flex-col items-center gap-1 p-2 py-3 overflow-y-auto">
         <button
           data-quick-link
           data-quick-group="collections"
           title="Collections"
           onclick="openCollectionsHome()"
-          class="quick-link-btn"
+          class="nav-btn"
         >
-          <i data-lucide="database" class="w-4 h-4"></i>
+          <i data-lucide="database" class="w-[18px] h-[18px]"></i>
         </button>
 
         <button
@@ -337,22 +372,12 @@
           hx-get="/admin/collections/_users/records"
           hx-target="#main-content"
           hx-push-url="/collections/_users"
-          class="quick-link-btn"
+          class="nav-btn"
         >
-          <i data-lucide="shield" class="w-4 h-4"></i>
+          <i data-lucide="shield" class="w-[18px] h-[18px]"></i>
         </button>
 
-        <button
-          data-quick-link
-          data-quick-group="settings"
-          title="Settings"
-          hx-get="/admin/collections/system-settings"
-          hx-target="#main-content"
-          hx-push-url="/settings"
-          class="quick-link-btn"
-        >
-          <i data-lucide="settings" class="w-4 h-4"></i>
-        </button>
+        <div class="sidebar-sep"></div>
 
         <button
           data-quick-link
@@ -361,9 +386,9 @@
           hx-get="/admin/collections/logs"
           hx-target="#main-content"
           hx-push-url="/logs"
-          class="quick-link-btn"
+          class="nav-btn"
         >
-          <i data-lucide="file-text" class="w-4 h-4"></i>
+          <i data-lucide="scroll-text" class="w-[18px] h-[18px]"></i>
         </button>
 
         <button
@@ -373,9 +398,9 @@
           hx-get="/admin/collections/api-tester"
           hx-target="#main-content"
           hx-push-url="/api-tester"
-          class="quick-link-btn"
+          class="nav-btn"
         >
-          <i data-lucide="flask-conical" class="w-4 h-4"></i>
+          <i data-lucide="flask-conical" class="w-[18px] h-[18px]"></i>
         </button>
 
         <button
@@ -385,9 +410,9 @@
           hx-get="/admin/collections/sql-explorer"
           hx-target="#main-content"
           hx-push-url="/sql-explorer"
-          class="quick-link-btn"
+          class="nav-btn"
         >
-          <i data-lucide="table-properties" class="w-4 h-4"></i>
+          <i data-lucide="table-2" class="w-[18px] h-[18px]"></i>
         </button>
 
         <button
@@ -397,438 +422,327 @@
           hx-get="/admin/custom-endpoints"
           hx-target="#main-content"
           hx-push-url="/custom-endpoints"
-          class="quick-link-btn"
+          class="nav-btn"
         >
-          <i data-lucide="code" class="w-4 h-4"></i>
+          <i data-lucide="code-2" class="w-[18px] h-[18px]"></i>
         </button>
-      </div>
+      </nav>
 
-      <div class="p-2 border-t border-border">
+      <!-- Bottom: theme + settings + logout -->
+      <div
+        class="flex flex-col items-center gap-1 p-2 pb-3 shrink-0"
+        style="border-top: 1px solid hsl(var(--sidebar-border));"
+      >
+        <button
+          id="theme-toggle"
+          title="Toggle theme"
+          class="nav-btn"
+          onclick="toggleTheme()"
+        >
+          <i data-lucide="sun"  class="w-[18px] h-[18px] dark:hidden"></i>
+          <i data-lucide="moon" class="w-[18px] h-[18px] hidden dark:block"></i>
+        </button>
+
+        <button
+          data-quick-link
+          data-quick-group="settings"
+          title="Settings"
+          hx-get="/admin/collections/system-settings"
+          hx-target="#main-content"
+          hx-push-url="/settings"
+          class="nav-btn"
+        >
+          <i data-lucide="settings-2" class="w-[18px] h-[18px]"></i>
+        </button>
+
         <button
           type="button"
           title="Logout"
           onclick="handleLogout()"
-          class="quick-link-btn w-full"
+          class="nav-btn"
         >
-          <i data-lucide="log-out" class="w-4 h-4"></i>
+          <i data-lucide="log-out" class="w-[18px] h-[18px]"></i>
         </button>
       </div>
     </aside>
 
+    <!-- ══════════════════════════════════════════════════════════
+         COLLECTIONS PANEL (240px, conditional)
+    ══════════════════════════════════════════════════════════ -->
     <aside
       id="collections-panel"
-      class="w-64 bg-background border-r border-border flex flex-col h-full"
+      class="w-60 flex flex-col h-full shrink-0 z-10"
+      style="background: hsl(var(--sidebar-bg)); border-right: 1px solid hsl(var(--sidebar-border));"
     >
+      <!-- Header -->
       <div
-        class="px-4 pt-4 pb-2 border-border flex items-center justify-between"
+        class="h-14 flex items-center justify-between px-4 shrink-0"
+        style="border-bottom: 1px solid hsl(var(--sidebar-border));"
       >
-        <h2
-          class="text-xs uppercase text-muted-foreground font-bold tracking-widest"
-        >
-          Collections
-        </h2>
+        <span
+          class="text-[10px] font-semibold uppercase tracking-widest"
+          style="color: hsl(var(--sidebar-muted));"
+        >Collections</span>
         <button
           hx-get="/admin/collections/new"
           hx-target="#drawer-container"
-          class="text-muted-foreground hover:bg-muted hover:text-foreground w-9 h-9 rounded-md transition flex items-center justify-center border border-transparent hover:border-border"
           title="New Collection"
+          class="nav-btn !w-7 !h-7"
         >
-          <svg
-            class="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 4v16m8-8H4"
-            ></path>
-          </svg>
+          <i data-lucide="plus" class="w-[15px] h-[15px]"></i>
         </button>
       </div>
 
-      <div class="px-4 pb-4 pt-2 flex-1 overflow-y-auto">
-        <div class="mb-3">
+      <!-- Search -->
+      <div
+        class="px-3 py-2 shrink-0"
+        style="border-bottom: 1px solid hsl(var(--sidebar-border));"
+      >
+        <div class="relative">
+          <i
+            data-lucide="search"
+            class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none"
+            style="color: hsl(var(--sidebar-muted));"
+          ></i>
           <input
             id="collections-search-input"
             type="search"
             name="search"
-            placeholder="Search collections..."
-            class="w-full flex h-8 rounded-md border border-border bg-background px-3 py-1 text-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            placeholder="Search collections…"
+            class="w-full h-8 pl-8 pr-3 rounded-md text-sm"
+            style="
+              border: 1px solid hsl(var(--border));
+              background: hsl(var(--background));
+              color: hsl(var(--foreground));
+              outline: none;
+            "
             hx-get="/admin/collections"
             hx-target="#collections-list"
             hx-trigger="keyup changed delay:300ms, search"
             hx-replace-url="false"
             oninput="syncCollectionsSearchUrl(this.value)"
+            onfocus="this.style.boxShadow='0 0 0 2px hsl(var(--ring)/0.4)'"
+            onblur="this.style.boxShadow='none'"
           />
         </div>
+      </div>
 
+      <!-- List -->
+      <div
+        id="collections-list"
+        hx-get="/admin/collections"
+        hx-trigger="load"
+        class="flex-1 overflow-y-auto p-2 space-y-px"
+      >
         <div
-          id="collections-list"
-          hx-get="/admin/collections"
-          hx-trigger="load"
-          class="space-y-1"
+          class="flex items-center gap-2 px-2 py-3 text-xs animate-pulse"
+          style="color: hsl(var(--sidebar-muted));"
         >
-          <div
-            class="text-sm text-muted-foreground/70 p-2 inline-flex items-center gap-2 animate-pulse"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              class="w-4 h-4 animate-spin"
-              aria-hidden="true"
-            >
-              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-            </svg>
-            <span>Loading collections...</span>
-          </div>
+          <svg
+            xmlns="http://www.w3.org/2000/svg" width="12" height="12"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="animation: spin 1s linear infinite;"
+          ><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+          Loading…
         </div>
       </div>
     </aside>
 
-    <main class="flex-1 flex flex-col h-full overflow-hidden bg-muted/40">
-      <div id="main-content" class="flex-1 p-8 overflow-y-auto">
-        <div
-          class="flex flex-col items-center justify-center h-full text-center text-muted-foreground/70"
-        >
-          <svg
-            class="w-14 h-14 mb-4 text-muted-foreground/25"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            xmlns="http://www.w3.org/2000/svg"
+    <!-- ══════════════════════════════════════════════════════════
+         MAIN CONTENT
+    ══════════════════════════════════════════════════════════ -->
+    <main class="flex-1 flex flex-col h-full overflow-hidden" style="background: hsl(var(--background));">
+      <div id="main-content" class="flex-1 overflow-y-auto" style="min-height:0;padding:1.5rem;">
+        <!-- Default empty state -->
+        <div class="flex flex-col items-center justify-center h-full text-center">
+          <div
+            class="w-16 h-16 mb-5 rounded-2xl flex items-center justify-center"
+            style="background: hsl(var(--muted));"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-            ></path>
-          </svg>
-          <p class="text-lg font-medium">No Collection Selected</p>
-          <p class="text-sm mt-1">
-            Choose a collection to manage its schema and records.
+            <i data-lucide="database" class="w-7 h-7" style="color: hsl(var(--muted-foreground));"></i>
+          </div>
+          <p class="text-base font-semibold" style="color: hsl(var(--foreground));">No collection selected</p>
+          <p class="text-sm mt-1 max-w-xs" style="color: hsl(var(--muted-foreground));">
+            Choose a collection from the sidebar, or create a new one to get started.
           </p>
         </div>
       </div>
     </main>
 
-    <script>
-      document.body.addEventListener("htmx:responseError", function (event) {
-        if (event.detail.xhr.status === 401) {
-          document.getElementById("main-content").innerHTML = `
-          <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
-            <strong class="font-bold">Unauthorized!</strong>
-            <span class="block sm:inline"> You are not logged in. Please <a href="/" class="underline text-red-800">log in from the main page</a> first.</span>
-          </div>
-        `;
-          return;
-        }
-
-        let message = "Request failed.";
-        try {
-          const parsed = JSON.parse(event.detail.xhr.responseText || "{}");
-          if (
-            parsed &&
-            typeof parsed.error === "string" &&
-            parsed.error.trim()
-          ) {
-            message = parsed.error;
-          } else if (
-            typeof event.detail.xhr.responseText === "string" &&
-            event.detail.xhr.responseText.trim()
-          ) {
-            message = event.detail.xhr.responseText.trim();
-          }
-        } catch (error) {
-          if (
-            typeof event.detail.xhr.responseText === "string" &&
-            event.detail.xhr.responseText.trim()
-          ) {
-            message = event.detail.xhr.responseText.trim();
-          }
-        }
-
-        if (window.showToast) {
-          window.showToast(message, "error");
-        }
-      });
-    </script>
-
+    <!-- Drawer -->
     <div id="drawer-container"></div>
 
+    <!-- Global loader -->
     <div
       id="global-loader"
-      class="fixed inset-0 z-[9999] bg-background/80 flex flex-col items-center justify-center backdrop-blur-sm transition-opacity duration-200"
-      style="opacity: 0; pointer-events: none"
+      class="fixed inset-0 z-[9999] flex items-center justify-center backdrop-blur-[2px] transition-opacity duration-200"
+      style="background: hsl(var(--background)/0.6); opacity:0; pointer-events:none;"
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="w-10 h-10 text-foreground animate-spin"
-        aria-hidden="true"
-      >
-        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-      </svg>
-      <div class="mt-4 text-sm font-medium text-foreground">Processing...</div>
+      <div
+        class="w-9 h-9 rounded-full border-2 border-t-transparent"
+        style="border-color: hsl(var(--border)); border-top-color: hsl(var(--primary)); animation: spin 0.7s linear infinite;"
+      ></div>
     </div>
 
+    <!-- Toast container -->
+    <div
+      id="toast-container"
+      class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[9998] flex flex-col items-center gap-2 pointer-events-none"
+    ></div>
+
+    <!-- ═══════════════════════════════════════════════════ SCRIPTS -->
     <script>
-      function toggleCollectionsPanel(open) {
-        const panel = document.getElementById("collections-panel");
-        if (!panel) return;
-        panel.classList.toggle("hidden", !open);
+      /* ── Theme toggle ───────────────────────────────────── */
+      function toggleTheme() {
+        var isDark = document.documentElement.classList.toggle("dark");
+        try { localStorage.setItem("grescale-theme", isDark ? "dark" : "light"); } catch(e){}
+        lucide.createIcons();
       }
 
+      /* ── Collections panel ──────────────────────────────── */
+      function toggleCollectionsPanel(open) {
+        var panel = document.getElementById("collections-panel");
+        if (panel) panel.classList.toggle("hidden", !open);
+      }
+
+      /* ── Drawer ─────────────────────────────────────────── */
       window.closeDrawer = function () {
-        const drawerContainer = document.getElementById("drawer-container");
-        if (!drawerContainer || !drawerContainer.children.length) return;
-        if (drawerContainer.dataset.closing === "1") return;
-
-        drawerContainer.dataset.closing = "1";
-        drawerContainer.classList.add("is-closing");
-
-        window.setTimeout(() => {
-          drawerContainer.innerHTML = "";
-          drawerContainer.classList.remove("is-closing");
-          delete drawerContainer.dataset.closing;
-        }, 250);
+        var c = document.getElementById("drawer-container");
+        if (!c || !c.children.length || c.dataset.closing === "1") return;
+        c.dataset.closing = "1";
+        c.classList.add("is-closing");
+        setTimeout(function () {
+          c.innerHTML = "";
+          c.classList.remove("is-closing");
+          delete c.dataset.closing;
+        }, 220);
       };
 
+      /* ── Empty state ─────────────────────────────────────── */
       function renderCollectionsHomePlaceholder() {
-        const main = document.getElementById("main-content");
+        var main = document.getElementById("main-content");
         if (!main) return;
-        main.innerHTML = `
-          <div class="flex flex-col items-center justify-center h-full text-center text-muted-foreground/70">
-            <svg
-              class="w-16 h-16 mb-4 text-gray-300"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-              ></path>
-            </svg>
-            <p class="text-lg font-medium">No Collection Selected</p>
-            <p class="text-sm mt-1">
-              Choose a collection to manage its schema and records.
-            </p>
-          </div>
-        `;
+        main.innerHTML =
+          '<div class="flex flex-col items-center justify-center h-full text-center">' +
+            '<div class="w-16 h-16 mb-5 rounded-2xl flex items-center justify-center" style="background:hsl(var(--muted))">' +
+              '<svg class="w-7 h-7" style="color:hsl(var(--muted-foreground))" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>' +
+            "</div>" +
+            '<p class="text-base font-semibold" style="color:hsl(var(--foreground))">No collection selected</p>' +
+            '<p class="text-sm mt-1 max-w-xs" style="color:hsl(var(--muted-foreground))">Choose a collection from the sidebar or create a new one.</p>' +
+          "</div>";
       }
 
+      /* ── Route → endpoint ───────────────────────────────── */
       function getEndpointForPath(path, params) {
-        if (path === "/collections") {
-          return "";
-        }
-
+        if (path === "/collections") return "";
         if (path.startsWith("/collections/")) {
-          const collectionName = decodeURIComponent(
-            path.replace("/collections/", ""),
-          );
-          const page = params.get("page") || "1";
-          const filter = params.get("filter") || "";
-          const sort = params.get("sort") || "created_at";
-          const order = params.get("order") || "desc";
-          const queryParams = new URLSearchParams();
-          queryParams.set("page", page);
-          queryParams.set("sort", sort);
-          queryParams.set("order", order);
-          if (filter) queryParams.set("filter", filter);
-          return `/admin/collections/${encodeURIComponent(collectionName)}/records?${queryParams.toString()}`;
+          var col = decodeURIComponent(path.replace("/collections/", ""));
+          var qp = new URLSearchParams();
+          qp.set("page",  params.get("page")  || "1");
+          qp.set("sort",  params.get("sort")  || "created_at");
+          qp.set("order", params.get("order") || "desc");
+          var filter = params.get("filter");
+          if (filter) qp.set("filter", filter);
+          return "/admin/collections/" + encodeURIComponent(col) + "/records?" + qp.toString();
         }
-
-        if (path === "/dashboard" || path === "/admin") {
-          return "/admin/collections";
-        }
-        if (path === "/settings") {
-          return "/admin/collections/system-settings";
-        }
-        if (path === "/logs") {
-          return "/admin/collections/logs";
-        }
-        if (path === "/api-tester") {
-          return "/admin/collections/api-tester";
-        }
-        if (path === "/sql-explorer") {
-          return "/admin/collections/sql-explorer";
-        }
-        if (path === "/custom-endpoints") {
-          const query = window.location.search || "";
-          return `/admin/custom-endpoints${query}`;
-        }
-
+        if (path === "/dashboard" || path === "/admin") return "/admin/collections";
+        if (path === "/settings")         return "/admin/collections/system-settings";
+        if (path === "/logs")             return "/admin/collections/logs";
+        if (path === "/api-tester")       return "/admin/collections/api-tester";
+        if (path === "/sql-explorer")     return "/admin/collections/sql-explorer";
+        if (path === "/custom-endpoints") return "/admin/custom-endpoints" + (window.location.search || "");
         return "/admin/collections";
       }
 
+      /* ── URL sync helpers ───────────────────────────────── */
       function syncCollectionFilterUrl(collectionName, filterValue) {
-        const trimmedFilter = (filterValue || "").trim();
-        const basePath = `/collections/${encodeURIComponent(collectionName)}`;
-        const currentParams = new URLSearchParams(window.location.search);
-        const nextParams = new URLSearchParams();
-
-        // Only keep route-control params; never persist arbitrary field state.
-        ["page", "sort", "order", "search"].forEach((key) => {
-          const value = currentParams.get(key);
-          if (value) nextParams.set(key, value);
-        });
-
-        if (trimmedFilter) {
-          nextParams.set("filter", trimmedFilter);
-        } else {
-          nextParams.delete("filter");
-        }
-
-        const nextUrl = nextParams.toString()
-          ? `${basePath}?${nextParams.toString()}`
-          : basePath;
-
-        if (
-          `${window.location.pathname}${window.location.search}` === nextUrl
-        ) {
-          return;
-        }
-
-        window.history.replaceState({}, "", nextUrl);
+        var trimmed = (filterValue || "").trim();
+        var base = "/collections/" + encodeURIComponent(collectionName);
+        var cur  = new URLSearchParams(window.location.search);
+        var next = new URLSearchParams();
+        ["page","sort","order","search"].forEach(function(k){ var v=cur.get(k); if(v) next.set(k,v); });
+        if (trimmed) next.set("filter", trimmed); else next.delete("filter");
+        var url = next.toString() ? base + "?" + next.toString() : base;
+        if (window.location.pathname + window.location.search === url) return;
+        window.history.replaceState({}, "", url);
         applyRouteState(false);
       }
 
       function syncCollectionsSearchUrl(searchValue) {
         if (!window.location.pathname.startsWith("/collections")) return;
-
-        const trimmedSearch = (searchValue || "").trim();
-        const currentParams = new URLSearchParams(window.location.search);
-        const nextParams = new URLSearchParams();
-
-        // Only keep route-control params; never persist arbitrary field state.
-        ["page", "sort", "order", "filter", "recordId"].forEach((key) => {
-          const value = currentParams.get(key);
-          if (value) nextParams.set(key, value);
-        });
-
-        if (trimmedSearch) {
-          nextParams.set("search", trimmedSearch);
-        } else {
-          nextParams.delete("search");
-        }
-
-        const nextQuery = nextParams.toString();
-        const nextUrl = nextQuery
-          ? `${window.location.pathname}?${nextQuery}`
+        var trimmed = (searchValue || "").trim();
+        var cur  = new URLSearchParams(window.location.search);
+        var next = new URLSearchParams();
+        ["page","sort","order","filter","recordId"].forEach(function(k){ var v=cur.get(k); if(v) next.set(k,v); });
+        if (trimmed) next.set("search", trimmed); else next.delete("search");
+        var nextUrl = next.toString()
+          ? window.location.pathname + "?" + next.toString()
           : window.location.pathname;
-        const currentUrl = `${window.location.pathname}${window.location.search}`;
-
-        if (currentUrl === nextUrl) return;
-
+        if (window.location.pathname + window.location.search === nextUrl) return;
         window.history.replaceState({}, "", nextUrl);
       }
 
       function restoreCollectionsSearchFromUrl() {
-        const input = document.getElementById("collections-search-input");
-        const list = document.getElementById("collections-list");
+        var input = document.getElementById("collections-search-input");
+        var list  = document.getElementById("collections-list");
         if (!input || !list) return;
-
-        const params = new URLSearchParams(window.location.search);
-        const search = params.get("search") || "";
-
-        if (input.value !== search) {
-          input.value = search;
-        }
-
+        var search = new URLSearchParams(window.location.search).get("search") || "";
+        if (input.value !== search) input.value = search;
         if (!window.htmx) return;
-
-        const endpoint = search
-          ? `/admin/collections?search=${encodeURIComponent(search)}`
+        var endpoint = search
+          ? "/admin/collections?search=" + encodeURIComponent(search)
           : "/admin/collections";
         window.htmx.ajax("GET", endpoint, "#collections-list");
       }
 
-      function applyRouteState(loadContent = false) {
-        const path = window.location.pathname;
-        const params = new URLSearchParams(window.location.search);
-        const endpoint = getEndpointForPath(path, params);
-
+      /* ── Route state ────────────────────────────────────── */
+      function applyRouteState(loadContent) {
+        var path   = window.location.pathname;
+        var params = new URLSearchParams(window.location.search);
+        var ep     = getEndpointForPath(path, params);
         applyActiveQuickLink();
         toggleCollectionsPanel(shouldShowCollectionsPanel(path));
-
         if (!loadContent) return;
-        if (!endpoint) {
-          renderCollectionsHomePlaceholder();
-          return;
-        }
-        if (window.htmx) {
-          window.htmx.ajax("GET", endpoint, "#main-content");
-        }
+        if (!ep) { renderCollectionsHomePlaceholder(); return; }
+        if (window.htmx) window.htmx.ajax("GET", ep, "#main-content");
       }
 
       function openCollectionsHome() {
-        if (window.location.pathname !== "/collections") {
+        if (window.location.pathname !== "/collections")
           window.history.pushState({}, "", "/collections");
-        }
         applyRouteState(true);
       }
 
       function shouldShowCollectionsPanel(pathname) {
         return (
           pathname === "/collections" ||
-          (pathname.startsWith("/collections/") &&
-            pathname !== "/collections/_users")
+          (pathname.startsWith("/collections/") && pathname !== "/collections/_users")
         );
       }
 
+      /* ── Active state ───────────────────────────────────── */
       function getActiveCollectionName(pathname) {
         if (!pathname.startsWith("/collections/")) return "";
-        const encodedName = pathname.replace("/collections/", "").split("/")[0];
-        const decodedName = decodeURIComponent(encodedName || "");
-        if (!decodedName || decodedName === "_users") return "";
-        return decodedName;
+        var enc = pathname.replace("/collections/", "").split("/")[0];
+        var dec = decodeURIComponent(enc || "");
+        if (!dec || dec === "_users") return "";
+        return dec;
       }
 
       function applyActiveCollectionItem() {
-        const activeCollection = getActiveCollectionName(
-          window.location.pathname,
-        );
-        const rows = document.querySelectorAll("[data-collection-item]");
-
-        rows.forEach((row) => {
-          const name = row.getAttribute("data-collection-name") || "";
-          const isActive = !!activeCollection && name === activeCollection;
-          const mainButton = row.querySelector(
-            "button[hx-target='#main-content']",
-          );
-
+        var active = getActiveCollectionName(window.location.pathname);
+        document.querySelectorAll("[data-collection-item]").forEach(function(row) {
+          var name = row.getAttribute("data-collection-name") || "";
+          var isActive = !!active && name === active;
           row.classList.toggle("bg-muted", isActive);
           row.classList.toggle("text-foreground", isActive);
           row.classList.toggle("hover:bg-muted", !isActive);
-
-          if (mainButton) {
-            mainButton.classList.toggle("bg-muted", isActive);
-            mainButton.classList.toggle("text-foreground", isActive);
-            mainButton.setAttribute(
-              "aria-current",
-              isActive ? "page" : "false",
-            );
+          var btn = row.querySelector("button[hx-target='#main-content']");
+          if (btn) {
+            btn.classList.toggle("bg-muted", isActive);
+            btn.classList.toggle("text-foreground", isActive);
+            btn.setAttribute("aria-current", isActive ? "page" : "false");
           }
         });
       }
@@ -838,9 +752,7 @@
           await fetch("/internal/api/auth/logout", {
             method: "POST",
             credentials: "same-origin",
-            headers: {
-              "HX-Request": "true",
-            },
+            headers: { "HX-Request": "true" },
           });
         } finally {
           window.location.replace("/login");
@@ -848,26 +760,22 @@
       }
 
       function getActiveGroup(pathname) {
-        if (pathname === "/collections/_users") return "superadmins";
-        if (pathname === "/collections") return "collections";
-        if (pathname.startsWith("/collections/")) return "collections";
-        if (pathname === "/dashboard" || pathname === "/admin")
-          return "collections";
-        if (pathname === "/settings") return "settings";
-        if (pathname === "/logs") return "logs";
-        if (pathname === "/api-tester") return "api-tester";
+        if (pathname === "/collections/_users")               return "superadmins";
+        if (pathname === "/collections")                      return "collections";
+        if (pathname.startsWith("/collections/"))             return "collections";
+        if (pathname === "/dashboard" || pathname === "/admin") return "collections";
+        if (pathname === "/settings")     return "settings";
+        if (pathname === "/logs")         return "logs";
+        if (pathname === "/api-tester")   return "api-tester";
         if (pathname === "/sql-explorer") return "sql-explorer";
         if (pathname === "/custom-endpoints") return "custom-endpoints";
         return "collections";
       }
 
-      applyActiveCollectionItem();
       function applyActiveQuickLink() {
-        const activeGroup = getActiveGroup(window.location.pathname);
-        const quickLinks = document.querySelectorAll("[data-quick-link]");
-        quickLinks.forEach((link) => {
-          const group = link.getAttribute("data-quick-group");
-          link.classList.toggle("active", group === activeGroup);
+        var active = getActiveGroup(window.location.pathname);
+        document.querySelectorAll("[data-quick-link]").forEach(function(btn) {
+          btn.classList.toggle("active", btn.getAttribute("data-quick-group") === active);
         });
       }
 
@@ -876,140 +784,132 @@
         applyActiveQuickLink();
       }
 
+      /* ── Boot ───────────────────────────────────────────── */
       refreshActiveUiState();
 
-      const collectionsList = document.getElementById("collections-list");
-      if (collectionsList) {
-        const collectionsObserver = new MutationObserver(function () {
-          refreshActiveUiState();
-        });
-
-        collectionsObserver.observe(collectionsList, {
-          childList: true,
-          subtree: true,
-        });
+      var _colList = document.getElementById("collections-list");
+      if (_colList) {
+        new MutationObserver(refreshActiveUiState).observe(_colList, { childList: true, subtree: true });
       }
 
-      document.body.addEventListener("htmx:afterSettle", refreshActiveUiState);
-      document.body.addEventListener(
-        "htmx:pushedIntoHistory",
-        refreshActiveUiState,
-      );
+      document.body.addEventListener("htmx:afterSettle",       refreshActiveUiState);
+      document.body.addEventListener("htmx:pushedIntoHistory", refreshActiveUiState);
       window.addEventListener("popstate", refreshActiveUiState);
 
-      document.body.addEventListener("click", function (event) {
-        const quickLink = event.target.closest("[data-quick-link]");
-        if (!quickLink) return;
-        const group = quickLink.getAttribute("data-quick-group");
-        if (group !== "collections") {
-          toggleCollectionsPanel(false);
-        } else {
-          toggleCollectionsPanel(true);
-        }
+      document.body.addEventListener("click", function(e) {
+        var ql = e.target.closest("[data-quick-link]");
+        if (!ql) return;
+        toggleCollectionsPanel(ql.getAttribute("data-quick-group") === "collections");
       });
 
-      document.body.addEventListener("htmx:send", function () {
-        const loader = document.getElementById("global-loader");
-        if (loader) {
-          loader.style.opacity = "1";
-          loader.style.pointerEvents = "auto";
-        }
+      /* ── Global loader ──────────────────────────────────── */
+      document.body.addEventListener("htmx:send", function() {
+        var l = document.getElementById("global-loader");
+        if (l) { l.style.opacity = "1"; l.style.pointerEvents = "auto"; }
+      });
+      document.body.addEventListener("htmx:afterRequest", function() {
+        var l = document.getElementById("global-loader");
+        if (l) { l.style.opacity = "0"; l.style.pointerEvents = "none"; }
       });
 
-      document.body.addEventListener("htmx:afterRequest", function () {
-        const loader = document.getElementById("global-loader");
-        if (loader) {
-          loader.style.opacity = "0";
-          loader.style.pointerEvents = "none";
+      /* ── Error handler ──────────────────────────────────── */
+      document.body.addEventListener("htmx:responseError", function(e) {
+        if (e.detail.xhr.status === 401) {
+          document.getElementById("main-content").innerHTML =
+            '<div class="p-8"><div class="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 px-4 py-3 text-sm text-red-700 dark:text-red-400">' +
+            '<strong class="font-semibold">Session expired.</strong> Please <a href="/login" class="underline">log in again</a>.</div></div>';
+          return;
         }
+        var msg = "Request failed.";
+        try {
+          var p = JSON.parse(e.detail.xhr.responseText || "{}");
+          if (p && p.error && p.error.trim()) msg = p.error;
+          else if (e.detail.xhr.responseText && e.detail.xhr.responseText.trim()) msg = e.detail.xhr.responseText.trim();
+        } catch(ex) {
+          if (e.detail.xhr.responseText && e.detail.xhr.responseText.trim()) msg = e.detail.xhr.responseText.trim();
+        }
+        if (window.showToast) window.showToast(msg, "error");
       });
 
-      window.showToast = function (message, type = "success") {
-        const container = document.getElementById("toast-container");
+      /* ── Toast ──────────────────────────────────────────── */
+      window.showToast = function(message, type) {
+        type = type || "success";
+        var container = document.getElementById("toast-container");
         if (!container) return;
-        const toast = document.createElement("div");
-        const toneClass =
-          type === "success"
-            ? "border-border text-foreground"
-            : "border-red-200 text-red-700";
-        toast.className = `transform transition-all duration-300 translate-y-4 opacity-0 bg-card border ${toneClass} px-4 py-3 rounded-lg shadow-sm flex items-center justify-between min-w-[250px]`;
-        const label = document.createElement("span");
-        label.className = "text-sm font-medium";
+
+        var isErr = type !== "success";
+        var toast = document.createElement("div");
+        toast.className = "pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-medium transition-all duration-300 translate-y-2 opacity-0";
+        toast.style.cssText = isErr
+          ? "background:hsl(var(--card));border-color:hsl(0 84% 60%/0.3);color:hsl(0 72% 50%);min-width:220px;max-width:360px;"
+          : "background:hsl(var(--card));border-color:hsl(var(--border));color:hsl(var(--foreground));min-width:220px;max-width:360px;";
+
+        var iconSvg = isErr
+          ? '<svg style="width:16px;height:16px;flex-shrink:0;color:hsl(0 72% 50%)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'
+          : '<svg style="width:16px;height:16px;flex-shrink:0;color:hsl(142 71% 45%)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>';
+
+        var label = document.createElement("span");
+        label.style.flex = "1";
         label.textContent = String(message);
 
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "ml-4 text-muted-foreground hover:text-foreground";
-        button.textContent = "×";
-        button.addEventListener("click", () => toast.remove());
+        var close = document.createElement("button");
+        close.style.cssText = "margin-left:4px;flex-shrink:0;color:hsl(var(--muted-foreground));background:none;border:none;cursor:pointer;padding:0;line-height:1;";
+        close.innerHTML = '<svg style="width:14px;height:14px" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
 
-        toast.append(label, button);
+        var iconEl = document.createElement("span");
+        iconEl.innerHTML = iconSvg;
+
+        toast.appendChild(iconEl);
+        toast.appendChild(label);
+        toast.appendChild(close);
         container.appendChild(toast);
 
-        requestAnimationFrame(() => {
-          toast.classList.remove("translate-y-4", "opacity-0");
-        });
-
-        setTimeout(() => {
-          toast.classList.add("opacity-0", "translate-y-4");
-          setTimeout(() => toast.remove(), 300);
-        }, 3500);
-      };
-
-      window.copyCollectionId = async function (event, id) {
-        if (event) {
-          event.preventDefault();
-          event.stopPropagation();
+        function removeToast(el) {
+          clearTimeout(el._t);
+          el.classList.add("opacity-0", "translate-y-2");
+          setTimeout(function() { el.remove(); }, 280);
         }
 
+        close.addEventListener("click", function() { removeToast(toast); });
+        requestAnimationFrame(function() {
+          toast.classList.remove("translate-y-2", "opacity-0");
+        });
+        toast._t = setTimeout(function() { removeToast(toast); }, 4000);
+      };
+
+      /* ── Clipboard ──────────────────────────────────────── */
+      window.copyCollectionId = async function(event, id) {
+        if (event) { event.preventDefault(); event.stopPropagation(); }
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
             await navigator.clipboard.writeText(id);
           } else {
-            const textarea = document.createElement("textarea");
-            textarea.value = id;
-            textarea.style.position = "fixed";
-            textarea.style.opacity = "0";
-            document.body.appendChild(textarea);
-            textarea.focus();
-            textarea.select();
-            const copied = document.execCommand("copy");
-            document.body.removeChild(textarea);
-            if (!copied) {
-              throw new Error("Clipboard copy failed");
-            }
+            var ta = document.createElement("textarea");
+            ta.value = id; ta.style.cssText = "position:fixed;opacity:0;";
+            document.body.appendChild(ta); ta.focus(); ta.select();
+            document.execCommand("copy"); document.body.removeChild(ta);
           }
-
           window.showToast("Copied to clipboard", "success");
-        } catch (error) {
-          console.error("Failed to copy collection ID:", error);
-          window.showToast("Failed to copy to clipboard", "error");
+        } catch(err) {
+          window.showToast("Failed to copy", "error");
         }
       };
 
-      document.body.addEventListener("show-toast", function (e) {
+      document.body.addEventListener("show-toast", function(e) {
         showToast(e.detail.message, e.detail.type);
       });
-
-      document.body.addEventListener("htmx:afterSwap", function () {
+      document.body.addEventListener("htmx:afterSwap", function() {
         applyActiveQuickLink();
         applyActiveCollectionItem();
       });
-
-      window.addEventListener("popstate", function () {
+      window.addEventListener("popstate", function() {
         restoreCollectionsSearchFromUrl();
         applyRouteState(true);
       });
-
-      document.addEventListener("DOMContentLoaded", function () {
+      document.addEventListener("DOMContentLoaded", function() {
         restoreCollectionsSearchFromUrl();
         applyRouteState(true);
       });
     </script>
-
-    <div
-      id="toast-container"
-      class="fixed bottom-4 left-1/2 z-[9999] flex -translate-x-1/2 flex-col items-center gap-2"
-    ></div>
   </body>
 </html>

@@ -4,6 +4,7 @@ import {
   listCustomEndpointFiles,
   readCustomEndpointFile,
   writeCustomEndpointFile,
+  isCustomEndpointsEnabled,
 } from "../services/customScriptsBackend.ts";
 
 export const customEndpoints = new Hono();
@@ -164,8 +165,26 @@ async function renderPage(
     ? await readCustomEndpointFile(selectedFile.fileName)
     : defaultScriptTemplate();
 
+  const enabled = isCustomEndpointsEnabled();
+
+  const disabledBanner = enabled
+    ? ""
+    : `
+    <div class="mb-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+      <svg class="mt-0.5 h-4 w-4 shrink-0 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+      </svg>
+      <div>
+        <p class="font-medium text-amber-800">Custom Endpoints are disabled</p>
+        <p class="mt-0.5 text-amber-700">Scripts are stored but will not handle requests until you enable them in
+          <a hx-get="${basePath.replace('/internal/api/custom-endpoints', '/admin/collections/system-settings').replace('/api/custom-endpoints', '/admin/collections/system-settings')}" hx-target="#main-content" hx-push-url="/settings" class="font-medium underline hover:text-amber-900">System Settings</a>.
+        </p>
+      </div>
+    </div>`;
+
   return `
     <div class="flex-1 flex flex-col gap-6">
+      ${disabledBanner}
       <div class="flex items-center justify-between border-b pb-4">
         <div>
           <h2 class="text-3xl font-bold tracking-tight">Custom Endpoints</h2>

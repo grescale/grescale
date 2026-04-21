@@ -17,6 +17,46 @@ const customEndpointsDir = path.resolve(process.cwd(), "custom_endpoints");
 
 export const customRouter = new Hono();
 
+// Runtime toggle for custom endpoints — persisted in _settings and can be
+// flipped live without a server restart via the admin UI.
+let _customEndpointsEnabled = false;
+
+export function isCustomEndpointsEnabled() {
+  return _customEndpointsEnabled;
+}
+
+export function setCustomEndpointsEnabled(value: boolean) {
+  _customEndpointsEnabled = value;
+}
+
+/**
+ * Loads the custom-endpoints enabled flag from the _settings table.
+ * Falls back to the ENABLE_CUSTOM_ENDPOINTS env var for backwards-compatibility.
+ * Safe to call even before the DB is fully bootstrapped — errors are swallowed.
+ */
+export async function initCustomEndpointsEnabledFromDb() {
+  // Prefer DB setting if it exists.
+  try {
+    const res =
+      await sql`SELECT value FROM _settings WHERE key = 'custom_endpoints' LIMIT 1`;
+    if (res.length > 0) {
+      const val =
+        typeof res[0].value === "string"
+          ? JSON.parse(res[0].value)
+          : res[0].value;
+      _customEndpointsEnabled = !!val?.enabled;
+      return;
+    }
+  } catch {
+    // DB not ready yet — fall through to env var.
+  }
+
+  // Fall back to env var.
+  const raw = (process.env.ENABLE_CUSTOM_ENDPOINTS || "").trim().toLowerCase();
+  _customEndpointsEnabled =
+    raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
 type SqlExecutor = any;
 
 type CollectionMeta = {
@@ -1280,6 +1320,35 @@ function findMatchingEndpoint(method: string, pathname: string) {
 
   return null;
 }
+
+// Wire the catch-all dispatcher into the exported Hono router.
+// This must be defined after findMatchingEndpoint and buildHookContext.
+// IMPORTANT: use `next` for non-matching paths so the main app's routes
+// (redirects, static files, etc.) are not shadowed by this catch-all.
+customRouter.all("*", async (c, next) => {
+  if (!_customEndpointsEnabled) {
+    return next();
+  }
+
+  const pathname = new URL(c.req.url).pathname;
+  const match = findMatchingEndpoint(c.req.method, pathname);
+  if (!match) {
+    return next();
+  }
+
+  const { endpoint, params } = match;
+  try {
+    const hookCtx = await buildHookContext(c, params);
+    const result = await endpoint.handler(hookCtx);
+    return normalizeHandlerResult(c, result);
+  } catch (err: any) {
+    if (err && typeof err.status === "number") {
+      return c.json({ error: err.message || "Error" }, err.status);
+    }
+    console.error(`[custom-endpoints] Unhandled error in ${endpoint.path}:`, err);
+    return c.json({ error: "Internal server error" }, 500);
+  }
+});
 
 async function handleLoadCustomScripts() {
   await ensureCustomEndpointDir();

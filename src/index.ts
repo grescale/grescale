@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import {
   loadCustomScripts,
   customRouter,
+  initCustomEndpointsEnabledFromDb,
 } from "./services/customScriptsBackend.ts";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
@@ -373,29 +374,28 @@ app.use("*", async (c, next) => {
   }
 });
 
-// Custom endpoints execute arbitrary server-side JS loaded from disk. Disabled by
-// default; opt in with ENABLE_CUSTOM_ENDPOINTS=1 (or true/yes). Keeping this off
-// until an admin explicitly enables it prevents a writable-scripts-dir foothold
-// from becoming instant RCE on boot.
-const CUSTOM_ENDPOINTS_ENABLED = (() => {
-  const raw = (process.env.ENABLE_CUSTOM_ENDPOINTS || "").trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
-})();
+// Always mount the custom endpoint dispatcher; it checks the runtime enabled flag
+// on each request so it can be toggled live from the admin UI without a restart.
+app.route("/", customRouter);
 
-if (CUSTOM_ENDPOINTS_ENABLED) {
-  // Mount custom endpoint dispatcher before API routes so it can intercept custom paths.
-  app.route("/", customRouter);
-
-  // Load dynamic filesystem-backed custom endpoint scripts.
-  if (process.env.DATABASE_URL) {
-    try {
-      await loadCustomScripts();
-    } catch (e) {}
-  }
+// Initialize the enabled flag from _settings (falls back to ENABLE_CUSTOM_ENDPOINTS env var).
+// Then load any existing scripts if enabled.
+if (process.env.DATABASE_URL) {
+  try {
+    await initCustomEndpointsEnabledFromDb();
+    await loadCustomScripts();
+  } catch (e) {}
 } else {
-  console.log(
-    "[custom-endpoints] Disabled. Set ENABLE_CUSTOM_ENDPOINTS=1 to load filesystem scripts.",
-  );
+  // DB URL not known yet; the flag will be initialized after DB setup completes.
+  const raw = (process.env.ENABLE_CUSTOM_ENDPOINTS || "").trim().toLowerCase();
+  const envEnabled =
+    raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+  if (envEnabled) {
+    // Will be loaded when DB is ready.
+    console.log(
+      "[custom-endpoints] ENABLE_CUSTOM_ENDPOINTS is set; scripts will load after DB setup.",
+    );
+  }
 }
 
 // Mount modules

@@ -28,6 +28,11 @@ import {
   sanitizeBackupFilename,
   savePgBackupSettings,
 } from "../services/collectionsBackend.ts";
+import {
+  setCustomEndpointsEnabled,
+  isCustomEndpointsEnabled,
+  loadCustomScripts,
+} from "../services/customScriptsBackend.ts";
 
 export const collections = new Hono();
 
@@ -254,7 +259,10 @@ collections.get("/new", async (c) => {
     <div data-drawer-backdrop class="fixed inset-0 z-50 bg-black/50 flex justify-end transition-opacity" onclick="if(event.target===this) window.closeDrawer()">
       <div data-drawer-panel class="w-full max-w-2xl bg-background shadow-xl h-full flex flex-col border-l border-border transform translate-x-0" onclick="event.stopPropagation()">
         <div class="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
-          <h2 class="text-xl font-bold text-foreground">New Collection</h2>
+          <div>
+            <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Collection</p>
+            <h2 class="text-base font-semibold text-foreground mt-0.5">New Collection</h2>
+          </div>
           <button type="button" onclick="window.closeDrawer()" class="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground">
             <svg class="w-5 h-5 block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -1140,16 +1148,18 @@ collections.get("/", async (c) => {
 
           const settingsIcon = `<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.02a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.02a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.02a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
           return `
-        <div data-collection-item data-collection-name="${t.table_name}" class="group flex items-center justify-between w-full rounded-lg border border-transparent bg-card px-3 py-2 transition-colors hover:bg-muted">
+        <div data-collection-item data-collection-name="${t.table_name}" class="group flex items-center gap-1 rounded-md">
           <button 
             hx-get="${collectionsBase}/${t.table_name}/records" 
             hx-target="#main-content"
             hx-push-url="/collections/${t.table_name}"
-            class="flex flex-1 items-center justify-between rounded-md px-2 py-1.5 text-left text-sm font-medium text-foreground transition outline-none hover:bg-muted hover:text-foreground"
+            class="flex flex-1 min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[0.8125rem] font-medium transition outline-none"
+            style="color:hsl(var(--sidebar-muted))"
           >
-            <span class="inline-flex items-center">${typeIcon}${t.table_name}</span>
+            <span class="inline-flex items-center shrink-0 opacity-60">${typeIcon.replace('mr-2','')}</span>
+            <span class="truncate">${t.table_name}</span>
           </button>
-          <button hx-get="${collectionsBase}/${t.table_name}/settings" hx-target="#drawer-container" class="rounded-md border border-transparent p-2 text-muted-foreground opacity-0 transition-colors hover:border-border hover:bg-muted hover:text-foreground group-hover:opacity-100" title="Settings">
+          <button hx-get="${collectionsBase}/${t.table_name}/settings" hx-target="#drawer-container" class="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-colors hover:bg-muted hover:text-foreground group-hover:opacity-100" title="Settings">
             ${settingsIcon}
           </button>
         </div>
@@ -1573,367 +1583,471 @@ collections.get("/system-settings", async (c) => {
     }
   } catch (e) {}
 
-  return c.html(`
-    <div class="max-w-5xl mx-auto rounded-2xl border border-border bg-card text-card-foreground shadow-sm p-6 mt-8">
-      <div class="mb-6 border-b border-border pb-4">
-        <p class="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">Settings</p>
-        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-foreground">System Settings</h2>
-        <p class="mt-2 text-sm text-muted-foreground">Export your schema to JSON, or import an existing schema.</p>
+  const customEndpointsEnabled = isCustomEndpointsEnabled();
+
+  return c.html((`
+  <style>
+    .settings-nav-btn {
+      display: flex; align-items: center; gap: 0.625rem;
+      width: 100%; padding: 0.5rem 0.75rem;
+      border-radius: 8px; border: none; background: transparent;
+      font-size: 0.8125rem; font-weight: 500; cursor: pointer; text-align: left;
+      color: hsl(var(--muted-foreground));
+      transition: background 0.12s, color 0.12s;
+      white-space: nowrap;
+    }
+    .settings-nav-btn:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+    .settings-nav-btn.active {
+      background: hsl(var(--primary)/0.1); color: hsl(var(--primary)); font-weight: 600;
+    }
+    .settings-panel { display: none; }
+    .settings-panel.active { display: block; }
+    .settings-section-title {
+      font-size: 0.65rem; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: hsl(var(--muted-foreground));
+      padding: 0.5rem 0.75rem 0.25rem;
+    }
+  </style>
+
+  <div style="display:flex;height:calc(100vh - 56px);min-height:0;margin:-1.5rem;overflow:hidden;">
+
+    <!-- ── Settings left nav ── -->
+    <aside style="width:200px;flex-shrink:0;border-right:1px solid hsl(var(--border));padding:1.25rem 0.5rem;display:flex;flex-direction:column;gap:2px;background:hsl(var(--card));overflow-y:auto;">
+      <div style="padding:0 0.75rem 0.75rem;border-bottom:1px solid hsl(var(--border));margin-bottom:0.5rem;">
+        <p style="font-size:0.65rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:hsl(var(--muted-foreground));">Settings</p>
+        <h2 style="font-size:1.125rem;font-weight:600;color:hsl(var(--foreground));margin-top:0.2rem;letter-spacing:-0.3px;">System</h2>
       </div>
 
-      <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <!-- Export Section -->
-        <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h3 class="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">Export Schema</h3>
-          <p class="mb-4 text-sm text-muted-foreground">Download a JSON file containing all your collections, schema definitions, and API rules. Useful for migrating to a new instance.</p>
-          <a href="${collectionsBase}/export/download" target="_blank" class="inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted">
-            <i data-lucide="download" class="w-4 h-4 inline-block align-middle mr-1"></i> Download Schema (JSON)
-          </a>
+      <button class="settings-nav-btn active" data-panel="general" onclick="switchSettingsPanel('general',this)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        General
+      </button>
+      <button class="settings-nav-btn" data-panel="api-providers" onclick="switchSettingsPanel('api-providers',this)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        API Providers
+      </button>
+      <button class="settings-nav-btn" data-panel="rate-limiter" onclick="switchSettingsPanel('rate-limiter',this)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Rate Limiter
+        <span style="margin-left:auto;font-size:0.65rem;padding:1px 6px;border-radius:9999px;font-weight:600;background:${rateLimiting.enabled ? "hsl(142 71% 45%/0.12);color:hsl(142 71% 35%)" : "hsl(var(--muted));color:hsl(var(--muted-foreground))"};">${rateLimiting.enabled ? "On" : "Off"}</span>
+      </button>
+      <button class="settings-nav-btn" data-panel="import-export" onclick="switchSettingsPanel('import-export',this)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Import / Export
+      </button>
+      <button class="settings-nav-btn" data-panel="backups" onclick="switchSettingsPanel('backups',this)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        Backups
+        <span style="margin-left:auto;font-size:0.65rem;padding:1px 6px;border-radius:9999px;font-weight:600;background:${pgBackupSettings.enabled ? "hsl(142 71% 45%/0.12);color:hsl(142 71% 35%)" : "hsl(var(--muted));color:hsl(var(--muted-foreground))"};">${pgBackupSettings.enabled ? "On" : "Off"}</span>
+      </button>
+      <button class="settings-nav-btn" data-panel="mail" onclick="switchSettingsPanel('mail',this)">
+        <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        Mail
+        <span style="margin-left:auto;font-size:0.65rem;padding:1px 5px;border-radius:9999px;background:hsl(var(--muted));color:hsl(var(--muted-foreground));font-weight:500;">Soon</span>
+      </button>
+    </aside>
+
+    <!-- ── Settings right content ── -->
+    <div style="flex:1;overflow-y:auto;padding:1.75rem 2rem;min-width:0;">
+
+      <!-- ── GENERAL ── -->
+      <div id="settings-panel-general" class="settings-panel active">
+        <div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid hsl(var(--border));">
+          <h3 style="font-size:1rem;font-weight:600;color:hsl(var(--foreground));">General</h3>
+          <p style="font-size:0.8125rem;color:hsl(var(--muted-foreground));margin-top:0.2rem;">Timezone and feature flags.</p>
         </div>
 
-        <!-- Import Section -->
-        <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h3 class="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">Import Schema</h3>
-          <p class="mb-4 text-sm text-muted-foreground">Paste your exported JSON array here to import collections. Tables and Views will be created automatically.</p>
-          <form hx-post="${collectionsBase}/import" hx-target="#import-result" class="space-y-4">
-            <textarea name="schema_json" rows="6" class="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder='[{"name": "users", "type": "auth", "schema": [...]}]'></textarea>
-            <button type="submit" class="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50">
-              <i data-lucide="upload" class="w-4 h-4 inline-block align-middle mr-1"></i> Import Schema
-            </button>
+        <!-- Timezone -->
+        <div class="rounded-xl border border-border bg-card p-6 shadow-sm mb-5">
+          <h4 class="mb-1 text-sm font-semibold text-foreground">Timezone</h4>
+          <p class="mb-4 text-sm text-muted-foreground">Controls how dates are displayed in the admin panel.</p>
+          <form id="timezone-settings-form" hx-post="${collectionsBase}/system-settings/timezone" hx-target="#timezone-save-result" class="space-y-3 max-w-2xl">
+            <label class="block text-sm font-medium text-foreground/80" for="system-timezone-select">Default Timezone</label>
+            <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
+              <select id="system-timezone-select" name="timezone" data-initial-value="${configuredTimeZone}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
+                ${COMMON_TIMEZONES.map((tz) => `<option value="${tz}" ${tz === configuredTimeZone ? "selected" : ""}>${tz}</option>`).join("")}
+              </select>
+              <button id="timezone-save-btn" type="submit" disabled class="inline-flex h-10 shrink-0 items-center justify-center whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save Timezone</button>
+            </div>
+            <div id="timezone-save-result" class="text-sm"></div>
           </form>
-          <div id="import-result" class="mt-4"></div>
         </div>
-      </div>
 
-      <div class="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
-        <h3 class="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">Google OAuth2</h3>
-        <p class="mb-4 text-sm text-muted-foreground">Enable Google login globally, then collections can opt into Google auth individually.</p>
-
-        <form id="google-oauth-settings-form" hx-post="${collectionsBase}/system-settings/google-oauth" hx-target="#google-oauth-settings-result" class="space-y-4 max-w-2xl">
-          <label class="flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
-            <input id="google-oauth-enabled" name="enabled" type="checkbox" value="true" ${googleOauth.enabled ? "checked" : ""} class="h-4 w-4 rounded border-border text-primary focus:ring-primary">
-            <span>Enable Google OAuth2 globally</span>
-          </label>
-
-          <div id="google-oauth-config" class="space-y-4 ${googleOauth.enabled ? "" : "hidden"}">
-            <div>
-              <label class="block text-sm font-medium text-foreground/80 mb-1" for="google-oauth-client-id">Client ID</label>
-              <input id="google-oauth-client-id" type="text" name="client_id" value="${String(googleOauth.client_id || "").replace(/"/g, "&quot;")}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Google OAuth client ID">
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-foreground/80 mb-1" for="google-oauth-client-secret">Client Secret</label>
-              <input id="google-oauth-client-secret" type="password" name="client_secret" value="${String(googleOauth.client_secret || "").replace(/"/g, "&quot;")}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Google OAuth client secret">
-            </div>
+        <!-- Custom Endpoints -->
+        <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-sm font-semibold text-foreground">Custom Endpoints</h4>
+            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${customEndpointsEnabled ? "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800" : "bg-muted text-muted-foreground border border-border"}">${customEndpointsEnabled ? "Enabled" : "Disabled"}</span>
           </div>
-
-          <div class="flex items-center gap-3">
-            <button id="google-oauth-save-btn" type="submit" disabled class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save Google OAuth</button>
-            <span class="text-xs text-muted-foreground">Callback URL: <code class="bg-muted px-1 py-0.5 rounded text-foreground">/api/collections/auth-with-oauth2/google/callback</code></span>
-          </div>
-          <div id="google-oauth-settings-result" class="text-sm"></div>
-        </form>
-      </div>
-
-      <div class="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
-        <h3 class="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">Timezone</h3>
-        <p class="mb-4 text-sm text-muted-foreground">Controls how date, date-only, and datetime fields are shown and parsed in the admin panel.</p>
-        <form id="timezone-settings-form" hx-post="${collectionsBase}/system-settings/timezone" hx-target="#timezone-save-result" class="space-y-3 max-w-2xl">
-          <label class="block text-sm font-medium text-foreground/80" for="system-timezone-select">Default Timezone</label>
-          <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
-            <select id="system-timezone-select" name="timezone" data-initial-value="${configuredTimeZone}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
-              ${COMMON_TIMEZONES.map((tz) => `<option value="${tz}" ${tz === configuredTimeZone ? "selected" : ""}>${tz}</option>`).join("")}
-            </select>
-            <button id="timezone-save-btn" type="submit" disabled class="inline-flex h-10 shrink-0 items-center justify-center whitespace-nowrap rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">
-              Save Timezone
-            </button>
-          </div>
-          <div id="timezone-save-result" class="text-sm"></div>
-        </form>
-      </div>
-
-      <div class="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
-        <h3 class="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">Scheduled Postgres Backup (pg_dump)</h3>
-        <p class="mb-4 text-sm text-muted-foreground">Creates portable <code>.dump</code> backups on schedule and keeps only the latest configured count.</p>
-
-        <form id="pg-backup-settings-form" hx-post="${collectionsBase}/backup/pg/settings" hx-target="#pg-backup-settings-result" class="space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <label for="pg-backup-enabled" class="inline-flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
-              <span>Enable schedule</span>
+          <p class="mb-4 text-sm text-muted-foreground">Allow filesystem-backed scripts in <code class="bg-muted px-1 rounded text-xs">custom_endpoints/</code> to register routes and cron jobs.</p>
+          <form id="custom-endpoints-form" hx-post="${collectionsBase}/system-settings/custom-endpoints" hx-target="#custom-endpoints-result" class="space-y-4">
+            <label for="custom-endpoints-enabled" class="inline-flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
               <span class="relative inline-flex h-6 w-11 items-center">
-                <input id="pg-backup-enabled" name="enabled" type="checkbox" value="true" ${pgBackupSettings.enabled ? "checked" : ""} class="peer sr-only" />
+                <input id="custom-endpoints-enabled" name="enabled" type="checkbox" value="true" ${customEndpointsEnabled ? "checked" : ""} class="peer sr-only" />
                 <span class="absolute inset-0 rounded-full bg-muted transition-colors peer-checked:bg-primary"></span>
                 <span class="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
               </span>
+              <span>Enable Custom Endpoints</span>
+            </label>
+            <div>
+              <button id="custom-endpoints-save-btn" type="submit" disabled class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save</button>
+            </div>
+            <div id="custom-endpoints-result" class="text-sm"></div>
+          </form>
+        </div>
+      </div>
+
+      <!-- ── API PROVIDERS ── -->
+      <div id="settings-panel-api-providers" class="settings-panel">
+        <div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid hsl(var(--border));">
+          <h3 style="font-size:1rem;font-weight:600;color:hsl(var(--foreground));">API Providers</h3>
+          <p style="font-size:0.8125rem;color:hsl(var(--muted-foreground));margin-top:0.2rem;">Third-party OAuth and authentication providers.</p>
+        </div>
+
+        <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div class="flex items-center gap-3 mb-4">
+            <div style="width:36px;height:36px;border-radius:8px;border:1px solid hsl(var(--border));display:flex;align-items:center;justify-content:center;background:hsl(var(--background));">
+              <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+            </div>
+            <div>
+              <h4 class="text-sm font-semibold text-foreground">Google OAuth2</h4>
+              <p class="text-xs text-muted-foreground">Allow users to sign in with their Google account.</p>
+            </div>
+            <span class="ml-auto inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${googleOauth.enabled ? "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800" : "bg-muted text-muted-foreground border border-border"}">${googleOauth.enabled ? "Enabled" : "Disabled"}</span>
+          </div>
+
+          <form id="google-oauth-settings-form" hx-post="${collectionsBase}/system-settings/google-oauth" hx-target="#google-oauth-settings-result" class="space-y-4">
+            <label class="flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
+              <input id="google-oauth-enabled" name="enabled" type="checkbox" value="true" ${googleOauth.enabled ? "checked" : ""} class="h-4 w-4 rounded border-border text-primary focus:ring-primary">
+              <span>Enable Google OAuth2 globally</span>
             </label>
 
-            <button id="pg-backup-save-btn" type="submit" disabled class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save Backup Settings</button>
-          </div>
-
-          <div id="pg-backup-config" class="space-y-4 ${pgBackupSettings.enabled ? "" : "hidden"}">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+            <div id="google-oauth-config" class="space-y-4 ${googleOauth.enabled ? "" : "hidden"}">
               <div>
-                <label class="block text-sm font-medium text-foreground/80 mb-1">Frequency</label>
-                <select id="pg-backup-frequency" name="frequency" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  ${PG_BACKUP_FREQUENCIES.map((freq) => `<option value="${freq}" ${pgBackupSettings.frequency === freq ? "selected" : ""}>${freq}</option>`).join("")}
-                </select>
+                <label class="block text-sm font-medium text-foreground/80 mb-1.5" for="google-oauth-client-id">Client ID</label>
+                <input id="google-oauth-client-id" type="text" name="client_id" value="${String(googleOauth.client_id || "").replace(/"/g, "&quot;")}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Google OAuth client ID">
               </div>
-
               <div>
-                <label class="block text-sm font-medium text-foreground/80 mb-1">Keep last N backups</label>
-                <input id="pg-backup-retain-count" type="number" name="retain_count" min="1" max="100" value="${pgBackupSettings.retainCount}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
+                <label class="block text-sm font-medium text-foreground/80 mb-1.5" for="google-oauth-client-secret">Client Secret</label>
+                <input id="google-oauth-client-secret" type="password" name="client_secret" value="${String(googleOauth.client_secret || "").replace(/"/g, "&quot;")}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" placeholder="Google OAuth client secret">
               </div>
             </div>
 
-            <div class="mt-4 flex items-center gap-3">
-              <button hx-post="${collectionsBase}/backup/pg/run" hx-target="#pg-backup-run-result" class="inline-flex h-10 items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted">Run Backup Now</button>
-              <span class="text-xs text-muted-foreground">Last run: ${pgBackupSettings.lastRunAt ? new Date(pgBackupSettings.lastRunAt).toLocaleString() : "never"}</span>
+            <div class="flex items-center gap-3 flex-wrap">
+              <button id="google-oauth-save-btn" type="submit" disabled class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save</button>
+              <span class="text-xs text-muted-foreground">Callback URL: <code class="bg-muted px-1.5 py-0.5 rounded text-xs font-mono">/api/collections/auth-with-oauth2/google/callback</code></span>
             </div>
-            <div id="pg-backup-run-result" class="text-sm mt-2"></div>
-
-            <div class="mt-6 rounded-lg border border-border overflow-hidden">
-              <div class="px-4 py-3 bg-muted/30 text-sm font-medium text-muted-foreground">Available pg_dump Backups</div>
-              ${
-                pgBackupFiles.length === 0
-                  ? '<div class="p-4 text-sm text-muted-foreground">No pg_dump backups found yet.</div>'
-                  : `<div class="divide-y divide-border">
-                      ${pgBackupFiles
-                        .map(
-                          (file: {
-                            name: string;
-                            sizeBytes: number;
-                            mtimeMs: number;
-                          }) => `
-                        <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <div class="text-sm font-mono text-foreground">${file.name}</div>
-                            <div class="text-xs text-muted-foreground">${formatBytes(file.sizeBytes)} • ${new Date(file.mtimeMs).toLocaleString()}</div>
-                          </div>
-                          <div class="flex items-center gap-2">
-                            <a href="${collectionsBase}/backup/pg/download/${encodeURIComponent(file.name)}" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-9 px-3 text-sm">Download</a>
-                            <button hx-post="${collectionsBase}/backup/pg/restore" hx-vals='{"filename":"${file.name.replace(/"/g, "&quot;")}"}' hx-confirm="Restore this pg_dump backup now? This will overwrite current database objects." hx-target="#pg-backup-restore-result" class="inline-flex items-center justify-center rounded-md bg-amber-600 text-white hover:bg-amber-700 h-9 px-3 text-sm">Restore</button>
-                          </div>
-                        </div>
-                      `,
-                        )
-                        .join("")}
-                    </div>`
-              }
-            </div>
-            <div id="pg-backup-restore-result" class="text-sm mt-2"></div>
-          </div>
-        </form>
-
-        <div id="pg-backup-settings-result" class="text-sm mt-2"></div>
-      </div>
-
-      <div class="mt-6 rounded-xl border border-border bg-card p-6 shadow-sm">
-        <div class="flex items-center justify-between mb-2">
-          <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-muted-foreground">Rate limiting</h3>
-          <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${rateLimiting.enabled ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-muted text-muted-foreground border border-border"}">${rateLimiting.enabled ? "Enabled" : "Disabled"}</span>
+            <div id="google-oauth-settings-result" class="text-sm"></div>
+          </form>
         </div>
-        <p class="mb-4 text-sm text-muted-foreground">Throttle requests per IP for selected paths. Patterns support <code>*</code> wildcards (e.g. <code>/api/collections/*/auth-with-password</code>).</p>
-
-        <form id="rate-limit-form" hx-post="${collectionsBase}/system-settings/rate-limiting" hx-target="#rate-limit-result" class="space-y-4">
-          <label class="flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
-            <input id="rate-limit-enabled" name="enabled" type="checkbox" value="true" ${rateLimiting.enabled ? "checked" : ""} class="h-4 w-4 rounded border-border text-primary focus:ring-primary">
-            <span>Enable rate limiting</span>
-          </label>
-
-          <input type="hidden" name="rules_json" id="rate-limit-rules-json" value="${JSON.stringify(rateLimiting.rules).replace(/"/g, "&quot;")}">
-
-          <div class="rounded-lg border border-border overflow-hidden">
-            <div class="grid grid-cols-[minmax(0,1fr)_110px_110px_130px_40px] gap-2 px-3 py-2 bg-muted/30 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <div>Path pattern</div>
-              <div>Max / IP</div>
-              <div>Interval (s)</div>
-              <div>Targeted users</div>
-              <div></div>
-            </div>
-            <div id="rate-limit-rows" class="divide-y divide-border"></div>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <button id="rate-limit-add-btn" type="button" class="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted">+ Add rule</button>
-            <button id="rate-limit-save-btn" type="submit" disabled class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save rate limit settings</button>
-          </div>
-          <div id="rate-limit-result" class="text-sm"></div>
-        </form>
       </div>
 
-    <script>
-      (function initSystemSettingsForms() {
-        const googleForm = document.getElementById('google-oauth-settings-form');
-        const googleEnabled = document.getElementById('google-oauth-enabled');
-        const googleConfig = document.getElementById('google-oauth-config');
-        const googleClientId = document.getElementById('google-oauth-client-id');
-        const googleClientSecret = document.getElementById('google-oauth-client-secret');
-        const googleSaveBtn = document.getElementById('google-oauth-save-btn');
+      <!-- ── RATE LIMITER ── -->
+      <div id="settings-panel-rate-limiter" class="settings-panel">
+        <div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid hsl(var(--border));">
+          <h3 style="font-size:1rem;font-weight:600;color:hsl(var(--foreground));">Rate Limiter</h3>
+          <p style="font-size:0.8125rem;color:hsl(var(--muted-foreground));margin-top:0.2rem;">Throttle requests per IP for selected paths.</p>
+        </div>
 
-        if (googleForm && googleEnabled && googleConfig && googleClientId && googleClientSecret && googleSaveBtn) {
-          const initialGoogleState = {
-            enabled: googleEnabled.checked,
-            clientId: googleClientId.value,
-            clientSecret: googleClientSecret.value,
-          };
+        <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-sm font-semibold text-foreground">Rate Limiting Rules</h4>
+            <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${rateLimiting.enabled ? "bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800" : "bg-muted text-muted-foreground border border-border"}">${rateLimiting.enabled ? "Enabled" : "Disabled"}</span>
+          </div>
+          <p class="mb-4 text-sm text-muted-foreground">Patterns support <code class="bg-muted px-1 rounded text-xs">*</code> wildcards (e.g. <code class="bg-muted px-1 rounded text-xs">/api/collections/*/auth-with-password</code>).</p>
 
-          const updateGoogleUi = function() {
-            googleConfig.classList.toggle('hidden', !googleEnabled.checked);
-            const unchanged =
-              googleEnabled.checked === initialGoogleState.enabled &&
-              googleClientId.value === initialGoogleState.clientId &&
-              googleClientSecret.value === initialGoogleState.clientSecret;
-            googleSaveBtn.disabled = unchanged;
-          };
+          <form id="rate-limit-form" hx-post="${collectionsBase}/system-settings/rate-limiting" hx-target="#rate-limit-result" class="space-y-4">
+            <label class="flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
+              <input id="rate-limit-enabled" name="enabled" type="checkbox" value="true" ${rateLimiting.enabled ? "checked" : ""} class="h-4 w-4 rounded border-border text-primary focus:ring-primary">
+              <span>Enable rate limiting</span>
+            </label>
 
-          googleEnabled.addEventListener('change', updateGoogleUi);
-          googleClientId.addEventListener('input', updateGoogleUi);
-          googleClientSecret.addEventListener('input', updateGoogleUi);
-          updateGoogleUi();
-        }
+            <input type="hidden" name="rules_json" id="rate-limit-rules-json" value="${JSON.stringify(rateLimiting.rules).replace(/"/g, "&quot;")}">
 
-        const timezoneForm = document.getElementById('timezone-settings-form');
-        const timezoneSelect = document.getElementById('system-timezone-select');
-        const timezoneSaveBtn = document.getElementById('timezone-save-btn');
+            <div class="rounded-lg border border-border overflow-hidden">
+              <div class="grid grid-cols-[minmax(0,1fr)_110px_110px_130px_40px] gap-2 px-3 py-2 bg-muted/50 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <div>Path pattern</div><div>Max / IP</div><div>Interval (s)</div><div>Targeted users</div><div></div>
+              </div>
+              <div id="rate-limit-rows" class="divide-y divide-border"></div>
+            </div>
 
-        if (timezoneForm && timezoneSelect && timezoneSaveBtn) {
-          const initialTimezone = timezoneSelect.getAttribute('data-initial-value') || timezoneSelect.value;
-          const updateTimezoneButton = function() {
-            timezoneSaveBtn.disabled = timezoneSelect.value === initialTimezone;
-          };
-          timezoneSelect.addEventListener('change', updateTimezoneButton);
-          updateTimezoneButton();
-        }
+            <div class="flex items-center gap-2">
+              <button id="rate-limit-add-btn" type="button" class="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground hover:bg-muted">+ Add rule</button>
+              <button id="rate-limit-save-btn" type="submit" disabled class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save</button>
+            </div>
+            <div id="rate-limit-result" class="text-sm"></div>
+          </form>
+        </div>
+      </div>
 
-        const pgForm = document.getElementById('pg-backup-settings-form');
-        const enabledInput = document.getElementById('pg-backup-enabled');
-        const frequencyInput = document.getElementById('pg-backup-frequency');
-        const retainInput = document.getElementById('pg-backup-retain-count');
-        const saveBtn = document.getElementById('pg-backup-save-btn');
-        const configPanel = document.getElementById('pg-backup-config');
+      <!-- ── IMPORT / EXPORT ── -->
+      <div id="settings-panel-import-export" class="settings-panel">
+        <div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid hsl(var(--border));">
+          <h3 style="font-size:1rem;font-weight:600;color:hsl(var(--foreground));">Import / Export</h3>
+          <p style="font-size:0.8125rem;color:hsl(var(--muted-foreground));margin-top:0.2rem;">Migrate schema between Grescale instances.</p>
+        </div>
 
-        if (!pgForm || !enabledInput || !frequencyInput || !retainInput || !saveBtn || !configPanel) return;
+        <div class="grid gap-5">
+          <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-1">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="text-muted-foreground"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <h4 class="text-sm font-semibold text-foreground">Export Schema</h4>
+            </div>
+            <p class="mb-4 text-sm text-muted-foreground">Download a JSON file with all your collections, schema, and API rules.</p>
+            <a href="${collectionsBase}/export/download" target="_blank" class="inline-flex h-10 w-full items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+              <i data-lucide="download" class="w-4 h-4 mr-2"></i> Download Schema (JSON)
+            </a>
+          </div>
 
-        const initialState = {
-          enabled: enabledInput.checked,
-          frequency: frequencyInput.value,
-          retainCount: retainInput.value,
+          <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-1">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" class="text-muted-foreground"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <h4 class="text-sm font-semibold text-foreground">Import Schema</h4>
+            </div>
+            <p class="mb-4 text-sm text-muted-foreground">Paste an exported JSON array to import collections. Tables and Views are created automatically.</p>
+            <form hx-post="${collectionsBase}/import" hx-target="#import-result" class="space-y-3">
+              <textarea name="schema_json" rows="7" class="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none" placeholder='[{"name": "users", "type": "auth", "schema": [...]}]'></textarea>
+              <button type="submit" class="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+                <i data-lucide="upload" class="w-4 h-4 mr-2"></i> Import Schema
+              </button>
+            </form>
+            <div id="import-result" class="mt-3"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── BACKUPS ── -->
+      <div id="settings-panel-backups" class="settings-panel">
+        <div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid hsl(var(--border));">
+          <h3 style="font-size:1rem;font-weight:600;color:hsl(var(--foreground));">Backups</h3>
+          <p style="font-size:0.8125rem;color:hsl(var(--muted-foreground));margin-top:0.2rem;">Scheduled PostgreSQL dumps via pg_dump.</p>
+        </div>
+
+        <div class="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <form id="pg-backup-settings-form" hx-post="${collectionsBase}/backup/pg/settings" hx-target="#pg-backup-settings-result" class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <label for="pg-backup-enabled" class="inline-flex items-center gap-3 text-sm font-medium text-foreground cursor-pointer">
+                <span>Enable schedule</span>
+                <span class="relative inline-flex h-6 w-11 items-center">
+                  <input id="pg-backup-enabled" name="enabled" type="checkbox" value="true" ${pgBackupSettings.enabled ? "checked" : ""} class="peer sr-only" />
+                  <span class="absolute inset-0 rounded-full bg-muted transition-colors peer-checked:bg-primary"></span>
+                  <span class="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
+                </span>
+              </label>
+              <button id="pg-backup-save-btn" type="submit" disabled class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50">Save Settings</button>
+            </div>
+
+            <div id="pg-backup-config" class="space-y-4 ${pgBackupSettings.enabled ? "" : "hidden"}">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                <div>
+                  <label class="block text-sm font-medium text-foreground/80 mb-1.5">Frequency</label>
+                  <select id="pg-backup-frequency" name="frequency" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    ${PG_BACKUP_FREQUENCIES.map((freq) => `<option value="${freq}" ${pgBackupSettings.frequency === freq ? "selected" : ""}>${freq}</option>`).join("")}
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-foreground/80 mb-1.5">Keep last N backups</label>
+                  <input id="pg-backup-retain-count" type="number" name="retain_count" min="1" max="100" value="${pgBackupSettings.retainCount}" class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-3 pt-2">
+                <button hx-post="${collectionsBase}/backup/pg/run" hx-target="#pg-backup-run-result" class="inline-flex h-9 items-center justify-center rounded-md border border-border bg-background px-4 text-sm font-medium text-foreground hover:bg-muted">Run Backup Now</button>
+                <span class="text-xs text-muted-foreground">Last run: ${pgBackupSettings.lastRunAt ? new Date(pgBackupSettings.lastRunAt).toLocaleString() : "never"}</span>
+              </div>
+              <div id="pg-backup-run-result" class="text-sm"></div>
+
+              <div class="rounded-lg border border-border overflow-hidden">
+                <div class="px-4 py-3 bg-muted/50 text-xs font-semibold uppercase tracking-wide text-muted-foreground">pg_dump Backups</div>
+                ${
+                  pgBackupFiles.length === 0
+                    ? '<div class="p-4 text-sm text-muted-foreground">No backups found yet.</div>'
+                    : `<div class="divide-y divide-border">
+                        ${pgBackupFiles
+                          .map(
+                            (file: { name: string; sizeBytes: number; mtimeMs: number }) => `
+                          <div class="px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div class="text-sm font-mono text-foreground">${file.name}</div>
+                              <div class="text-xs text-muted-foreground">${formatBytes(file.sizeBytes)} · ${new Date(file.mtimeMs).toLocaleString()}</div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <a href="${collectionsBase}/backup/pg/download/${encodeURIComponent(file.name)}" class="inline-flex items-center justify-center rounded-md border border-input bg-background hover:bg-accent h-8 px-3 text-xs">Download</a>
+                              <button hx-post="${collectionsBase}/backup/pg/restore" hx-vals='{"filename":"${file.name.replace(/"/g, "&quot;")}"}' hx-confirm="Restore this backup? This will overwrite current database objects." hx-target="#pg-backup-restore-result" class="inline-flex items-center justify-center rounded-md bg-amber-600 text-white hover:bg-amber-700 h-8 px-3 text-xs">Restore</button>
+                            </div>
+                          </div>
+                        `,
+                          )
+                          .join("")}
+                      </div>`
+                }
+              </div>
+              <div id="pg-backup-restore-result" class="text-sm"></div>
+            </div>
+          </form>
+          <div id="pg-backup-settings-result" class="text-sm mt-3"></div>
+        </div>
+      </div>
+
+      <!-- ── MAIL ── -->
+      <div id="settings-panel-mail" class="settings-panel">
+        <div style="margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:1px solid hsl(var(--border));">
+          <h3 style="font-size:1rem;font-weight:600;color:hsl(var(--foreground));">Mail Settings</h3>
+          <p style="font-size:0.8125rem;color:hsl(var(--muted-foreground));margin-top:0.2rem;">Configure SMTP for transactional emails.</p>
+        </div>
+        <div class="rounded-xl border border-border bg-card p-10 shadow-sm flex flex-col items-center justify-center text-center gap-3">
+          <div class="w-12 h-12 rounded-2xl flex items-center justify-center" style="background:hsl(var(--muted));">
+            <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:hsl(var(--muted-foreground))"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          </div>
+          <p class="text-sm font-semibold text-foreground">Mail configuration coming soon</p>
+          <p class="text-xs text-muted-foreground max-w-xs">SMTP settings, email templates, and provider integrations will be available in a future release.</p>
+        </div>
+      </div>
+
+    </div><!-- end right content -->
+  </div><!-- end flex layout -->
+
+  <script>
+    function switchSettingsPanel(panelId, btn) {
+      document.querySelectorAll('.settings-panel').forEach(function(p) { p.classList.remove('active'); });
+      document.querySelectorAll('.settings-nav-btn').forEach(function(b) { b.classList.remove('active'); });
+      var panel = document.getElementById('settings-panel-' + panelId);
+      if (panel) panel.classList.add('active');
+      if (btn) btn.classList.add('active');
+    }
+
+    (function initSystemSettingsForms() {
+      const googleForm = document.getElementById('google-oauth-settings-form');
+      const googleEnabled = document.getElementById('google-oauth-enabled');
+      const googleConfig = document.getElementById('google-oauth-config');
+      const googleClientId = document.getElementById('google-oauth-client-id');
+      const googleClientSecret = document.getElementById('google-oauth-client-secret');
+      const googleSaveBtn = document.getElementById('google-oauth-save-btn');
+
+      if (googleForm && googleEnabled && googleConfig && googleClientId && googleClientSecret && googleSaveBtn) {
+        const initialGoogleState = { enabled: googleEnabled.checked, clientId: googleClientId.value, clientSecret: googleClientSecret.value };
+        const updateGoogleUi = function() {
+          googleConfig.classList.toggle('hidden', !googleEnabled.checked);
+          const unchanged = googleEnabled.checked === initialGoogleState.enabled && googleClientId.value === initialGoogleState.clientId && googleClientSecret.value === initialGoogleState.clientSecret;
+          googleSaveBtn.disabled = unchanged;
         };
+        googleEnabled.addEventListener('change', updateGoogleUi);
+        googleClientId.addEventListener('input', updateGoogleUi);
+        googleClientSecret.addEventListener('input', updateGoogleUi);
+        updateGoogleUi();
+      }
 
-        const updatePgSettingsUi = function() {
-          configPanel.classList.toggle('hidden', !enabledInput.checked);
-          const unchanged =
-            enabledInput.checked === initialState.enabled &&
-            frequencyInput.value === initialState.frequency &&
-            retainInput.value === initialState.retainCount;
-          saveBtn.disabled = unchanged;
+      const timezoneSelect = document.getElementById('system-timezone-select');
+      const timezoneSaveBtn = document.getElementById('timezone-save-btn');
+      if (timezoneSelect && timezoneSaveBtn) {
+        const initialTimezone = timezoneSelect.getAttribute('data-initial-value') || timezoneSelect.value;
+        timezoneSelect.addEventListener('change', function() { timezoneSaveBtn.disabled = timezoneSelect.value === initialTimezone; });
+        timezoneSaveBtn.disabled = timezoneSelect.value === initialTimezone;
+      }
+
+      const pgForm = document.getElementById('pg-backup-settings-form');
+      const pgEnabled = document.getElementById('pg-backup-enabled');
+      const pgFreq = document.getElementById('pg-backup-frequency');
+      const pgRetain = document.getElementById('pg-backup-retain-count');
+      const pgSave = document.getElementById('pg-backup-save-btn');
+      const pgConfig = document.getElementById('pg-backup-config');
+      if (pgForm && pgEnabled && pgFreq && pgRetain && pgSave && pgConfig) {
+        const init = { enabled: pgEnabled.checked, frequency: pgFreq.value, retainCount: pgRetain.value };
+        const updatePg = function() {
+          pgConfig.classList.toggle('hidden', !pgEnabled.checked);
+          pgSave.disabled = pgEnabled.checked === init.enabled && pgFreq.value === init.frequency && pgRetain.value === init.retainCount;
         };
+        pgEnabled.addEventListener('change', updatePg); pgFreq.addEventListener('change', updatePg); pgRetain.addEventListener('input', updatePg);
+        updatePg();
+      }
 
-        enabledInput.addEventListener('change', updatePgSettingsUi);
-        frequencyInput.addEventListener('change', updatePgSettingsUi);
-        retainInput.addEventListener('input', updatePgSettingsUi);
+      const rlEnabled = document.getElementById('rate-limit-enabled');
+      const rlRows = document.getElementById('rate-limit-rows');
+      const rlAddBtn = document.getElementById('rate-limit-add-btn');
+      const rlSaveBtn = document.getElementById('rate-limit-save-btn');
+      const rlHidden = document.getElementById('rate-limit-rules-json');
+      if (rlEnabled && rlRows && rlAddBtn && rlSaveBtn && rlHidden) {
+        let rlRules = [];
+        try { rlRules = JSON.parse(rlHidden.value || '[]') || []; } catch(e) {}
+        const initialRlState = JSON.stringify({ enabled: rlEnabled.checked, rules: rlRules });
+        const rlTargets = [{ value:'all',label:'All' },{ value:'guest',label:'Guest only' },{ value:'auth',label:'Auth only' }];
 
-        updatePgSettingsUi();
-
-        const rlForm = document.getElementById('rate-limit-form');
-        const rlEnabled = document.getElementById('rate-limit-enabled');
-        const rlRows = document.getElementById('rate-limit-rows');
-        const rlAddBtn = document.getElementById('rate-limit-add-btn');
-        const rlSaveBtn = document.getElementById('rate-limit-save-btn');
-        const rlHidden = document.getElementById('rate-limit-rules-json');
-
-        if (rlForm && rlEnabled && rlRows && rlAddBtn && rlSaveBtn && rlHidden) {
-          let rlRules = [];
-          try { rlRules = JSON.parse(rlHidden.value || '[]') || []; } catch (e) { rlRules = []; }
-          const initialRlState = JSON.stringify({ enabled: rlEnabled.checked, rules: rlRules });
-
-          const rlTargets = [
-            { value: 'all', label: 'All' },
-            { value: 'guest', label: 'Guest only' },
-            { value: 'auth', label: 'Auth only' },
-          ];
-
-          const renderRlRows = function() {
-            rlRows.innerHTML = '';
-            if (rlRules.length === 0) {
-              rlRows.innerHTML = '<div class="p-3 text-xs text-muted-foreground">No rules configured.</div>';
-            }
-            rlRules.forEach(function(rule, idx) {
-              const row = document.createElement('div');
-              row.className = 'grid grid-cols-[minmax(0,1fr)_110px_110px_130px_40px] gap-2 px-3 py-2 items-center';
-              const patternInput = document.createElement('input');
-              patternInput.type = 'text';
-              patternInput.value = rule.pattern || '';
-              patternInput.placeholder = '/api/*';
-              patternInput.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm font-mono';
-              patternInput.addEventListener('input', function() { rule.pattern = patternInput.value; syncRl(); });
-
-              const maxInput = document.createElement('input');
-              maxInput.type = 'number';
-              maxInput.min = '1';
-              maxInput.value = String(rule.maxRequests || 10);
-              maxInput.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm';
-              maxInput.addEventListener('input', function() { rule.maxRequests = parseInt(maxInput.value, 10) || 1; syncRl(); });
-
-              const intervalInput = document.createElement('input');
-              intervalInput.type = 'number';
-              intervalInput.min = '1';
-              intervalInput.value = String(rule.intervalSeconds || 60);
-              intervalInput.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm';
-              intervalInput.addEventListener('input', function() { rule.intervalSeconds = parseInt(intervalInput.value, 10) || 1; syncRl(); });
-
-              const targetSelect = document.createElement('select');
-              targetSelect.className = 'h-9 rounded-md border border-border bg-background px-2 text-sm';
-              rlTargets.forEach(function(t) {
-                const opt = document.createElement('option');
-                opt.value = t.value;
-                opt.textContent = t.label;
-                if ((rule.targetedUsers || 'all') === t.value) opt.selected = true;
-                targetSelect.appendChild(opt);
-              });
-              targetSelect.addEventListener('change', function() { rule.targetedUsers = targetSelect.value; syncRl(); });
-
-              const removeBtn = document.createElement('button');
-              removeBtn.type = 'button';
-              removeBtn.className = 'inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground';
-              removeBtn.textContent = '\u00D7';
-              removeBtn.title = 'Remove rule';
-              removeBtn.addEventListener('click', function() {
-                rlRules.splice(idx, 1);
-                renderRlRows();
-                syncRl();
-              });
-
-              row.appendChild(patternInput);
-              row.appendChild(maxInput);
-              row.appendChild(intervalInput);
-              row.appendChild(targetSelect);
-              row.appendChild(removeBtn);
-              rlRows.appendChild(row);
-            });
-          };
-
-          const syncRl = function() {
-            rlHidden.value = JSON.stringify(rlRules);
-            const current = JSON.stringify({ enabled: rlEnabled.checked, rules: rlRules });
-            rlSaveBtn.disabled = current === initialRlState;
-          };
-
-          rlEnabled.addEventListener('change', syncRl);
-          rlAddBtn.addEventListener('click', function() {
-            rlRules.push({ label: '', pattern: '', maxRequests: 10, intervalSeconds: 60, targetedUsers: 'all' });
-            renderRlRows();
-            syncRl();
+        const renderRlRows = function() {
+          rlRows.innerHTML = '';
+          if (rlRules.length === 0) { rlRows.innerHTML = '<div class="p-3 text-xs text-muted-foreground">No rules configured.</div>'; }
+          rlRules.forEach(function(rule, idx) {
+            const row = document.createElement('div');
+            row.className = 'grid grid-cols-[minmax(0,1fr)_110px_110px_130px_40px] gap-2 px-3 py-2 items-center';
+            const patternInput = document.createElement('input'); patternInput.type='text'; patternInput.value=rule.pattern||''; patternInput.placeholder='/api/*'; patternInput.className='h-9 rounded-md border border-border bg-background px-2 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'; patternInput.addEventListener('input',function(){ rule.pattern=patternInput.value; syncRl(); });
+            const maxInput = document.createElement('input'); maxInput.type='number'; maxInput.min='1'; maxInput.value=String(rule.maxRequests||10); maxInput.className='h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'; maxInput.addEventListener('input',function(){ rule.maxRequests=parseInt(maxInput.value,10)||1; syncRl(); });
+            const intervalInput = document.createElement('input'); intervalInput.type='number'; intervalInput.min='1'; intervalInput.value=String(rule.intervalSeconds||60); intervalInput.className='h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'; intervalInput.addEventListener('input',function(){ rule.intervalSeconds=parseInt(intervalInput.value,10)||1; syncRl(); });
+            const targetSelect = document.createElement('select'); targetSelect.className='h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+            rlTargets.forEach(function(t){ var opt=document.createElement('option'); opt.value=t.value; opt.textContent=t.label; if((rule.targetedUsers||'all')===t.value) opt.selected=true; targetSelect.appendChild(opt); });
+            targetSelect.addEventListener('change',function(){ rule.targetedUsers=targetSelect.value; syncRl(); });
+            const removeBtn = document.createElement('button'); removeBtn.type='button'; removeBtn.className='inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground'; removeBtn.textContent='\u00D7'; removeBtn.title='Remove';
+            removeBtn.addEventListener('click',function(){ rlRules.splice(idx,1); renderRlRows(); syncRl(); });
+            row.appendChild(patternInput); row.appendChild(maxInput); row.appendChild(intervalInput); row.appendChild(targetSelect); row.appendChild(removeBtn);
+            rlRows.appendChild(row);
           });
+        };
+        const syncRl = function() { rlHidden.value=JSON.stringify(rlRules); rlSaveBtn.disabled=JSON.stringify({enabled:rlEnabled.checked,rules:rlRules})===initialRlState; };
+        rlEnabled.addEventListener('change', syncRl);
+        rlAddBtn.addEventListener('click',function(){ rlRules.push({label:'',pattern:'',maxRequests:10,intervalSeconds:60,targetedUsers:'all'}); renderRlRows(); syncRl(); });
+        renderRlRows(); syncRl();
+      }
 
-          renderRlRows();
-          syncRl();
+      const ceEnabled = document.getElementById('custom-endpoints-enabled');
+      const ceSaveBtn = document.getElementById('custom-endpoints-save-btn');
+      if (ceEnabled && ceSaveBtn) {
+        const initialCe = ceEnabled.checked;
+        ceEnabled.addEventListener('change', function() { ceSaveBtn.disabled = ceEnabled.checked === initialCe; });
+        ceSaveBtn.disabled = ceEnabled.checked === initialCe;
+      }
+    })();
+  </script>
+  `) as string);
+});
+
+collections.post("/system-settings/custom-endpoints", async (c) => {
+  const collectionsBase = getCollectionsBasePath(c);
+  const body = await c.req.parseBody();
+
+  try {
+    const enabled = body.enabled === "true";
+    const next = { enabled };
+
+    await sql`DELETE FROM _settings WHERE key = 'custom_endpoints'`;
+    await sql`
+      INSERT INTO _settings (key, value)
+      VALUES ('custom_endpoints', ${JSON.stringify(next)}::jsonb)
+    `;
+
+    // Apply the change to the runtime flag immediately.
+    setCustomEndpointsEnabled(enabled);
+
+    // If enabling, make sure scripts are loaded.
+    if (enabled) {
+      try {
+        await loadCustomScripts();
+      } catch (e) {
+        console.error("[custom-endpoints] Script load error after enable:", e);
+      }
+    }
+
+    return c.html(`
+      <script>
+        showToast("Custom endpoints ${enabled ? "enabled" : "disabled"}.", "success");
+        if (window.htmx && typeof window.htmx.ajax === 'function') {
+          window.htmx.ajax('GET', '${collectionsBase}/system-settings', '#main-content');
         }
-      })();
-    </script>
-
-    </div>
-  `);
+      </script>
+    `);
+  } catch (err: any) {
+    console.error("Custom endpoints settings save error:", err);
+    return c.html(
+      `<script>showToast(${JSON.stringify("Failed to save custom endpoints setting.")}, "error");</script>`,
+    );
+  }
 });
 
 collections.post("/system-settings/timezone", async (c) => {
@@ -2522,76 +2636,70 @@ collections.get("/:collection/records", async (c) => {
     const loadMoreUrl = `${collectionsBase}/${collectionName}/records?page=${nextPage}&partial=1&${sortQuery}${filter ? `&filter=${encodeURIComponent(filter)}` : ""}`;
 
     const formatCellValue = (val: any, colName: string) => {
-      if (val === null) {
-        return '<span class="text-muted-foreground/70 italic">null</span>';
+      // Null / undefined → subtle dash
+      if (val === null || val === undefined) {
+        return '<span style="color:hsl(var(--muted-foreground)/0.5);font-size:0.8rem;">—</span>';
       }
 
       const escapeHtml = (value: string) =>
         value
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
       const stripHtml = (value: string) => value.replace(/<[^>]*>/g, "");
 
-      // Handle Date objects
-      if (val instanceof Date) {
-        const dateStr = val.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-          timeZone: configuredTimeZone,
-        });
-        const timeStr = val.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-          timeZone: configuredTimeZone,
-        });
-        return `<div class="flex flex-col items-center gap-0.5"><span>${dateStr}</span><span class="text-xs text-muted-foreground">${timeStr}</span></div>`;
+      // Boolean → colored pill badge
+      if (typeof val === "boolean" || val === true || val === false) {
+        return val
+          ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:9999px;font-size:0.7rem;font-weight:600;letter-spacing:0.02em;background:hsl(142 71% 45%/0.12);color:hsl(142 60% 30%);border:1px solid hsl(142 71% 45%/0.25);">
+               <svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><circle cx="4" cy="4" r="4"/></svg>true
+             </span>`
+          : `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:9999px;font-size:0.7rem;font-weight:600;letter-spacing:0.02em;background:hsl(0 72% 51%/0.1);color:hsl(0 60% 45%);border:1px solid hsl(0 72% 51%/0.2);">
+               <svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><circle cx="4" cy="4" r="4"/></svg>false
+             </span>`;
       }
+
+      // Date objects
+      if (val instanceof Date) {
+        const dateStr = val.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: configuredTimeZone });
+        const timeStr = val.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: configuredTimeZone });
+        return `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:1px"><span style="font-size:0.8125rem">${dateStr}</span><span style="font-size:0.7rem;color:hsl(var(--muted-foreground))">${timeStr}</span></div>`;
+      }
+
+      // Objects/arrays → code badge
       if (typeof val === "object") {
         const jsonText = JSON.stringify(val);
-        const clippedJson =
-          jsonText.length > 50 ? `${jsonText.substring(0, 50)}...` : jsonText;
-        return `<span class="block min-w-0 truncate">${escapeHtml(clippedJson)}</span>`;
+        const clipped = jsonText.length > 40 ? `${jsonText.substring(0, 40)}…` : jsonText;
+        return `<span style="font-family:monospace;font-size:0.7rem;background:hsl(var(--muted));border:1px solid hsl(var(--border));padding:1px 6px;border-radius:4px;color:hsl(var(--muted-foreground));white-space:nowrap;display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="${escapeHtml(jsonText)}">${escapeHtml(clipped)}</span>`;
       }
+
+      // Numbers → right-aligned, no badge
+      if (typeof val === "number") {
+        return `<span style="font-variant-numeric:tabular-nums;font-size:0.8125rem">${val.toLocaleString()}</span>`;
+      }
+
       const strVal = String(val);
-      // Check if it's a datetime field (created_at, updated_at, or ends with _at)
-      if (
-        (colName.endsWith("_at") || colName.endsWith("_date")) &&
-        (strVal.includes("T") || strVal.includes(" "))
-      ) {
+
+      // String boolean check
+      if (strVal === "true") return `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:9999px;font-size:0.7rem;font-weight:600;background:hsl(142 71% 45%/0.12);color:hsl(142 60% 30%);border:1px solid hsl(142 71% 45%/0.25);"><svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><circle cx="4" cy="4" r="4"/></svg>true</span>`;
+      if (strVal === "false") return `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:9999px;font-size:0.7rem;font-weight:600;background:hsl(0 72% 51%/0.1);color:hsl(0 60% 45%);border:1px solid hsl(0 72% 51%/0.2);"><svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><circle cx="4" cy="4" r="4"/></svg>false</span>`;
+
+      // Datetime columns (_at, _date)
+      if ((colName.endsWith("_at") || colName.endsWith("_date")) && (strVal.includes("T") || strVal.includes(" "))) {
         try {
           const date = new Date(strVal);
           if (!isNaN(date.getTime())) {
-            const dateStr = date.toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-              timeZone: configuredTimeZone,
-            });
-            const timeStr = date.toLocaleTimeString("en-US", {
-              hour: "numeric",
-              minute: "2-digit",
-              hour12: true,
-              timeZone: configuredTimeZone,
-            });
-            return `<div class="flex flex-col items-center gap-0.5"><span>${dateStr}</span><span class="text-xs text-muted-foreground">${timeStr}</span></div>`;
+            const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: configuredTimeZone });
+            const timeStr = date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: configuredTimeZone });
+            return `<div style="display:flex;flex-direction:column;gap:1px"><span style="font-size:0.8125rem">${dateStr}</span><span style="font-size:0.7rem;color:hsl(var(--muted-foreground))">${timeStr}</span></div>`;
           }
-        } catch (e) {
-          // Fall through to normal formatting
-        }
+        } catch (e) {}
       }
 
+      // Long text clip
       const previewText = stripHtml(strVal);
-      const clippedText =
-        previewText.length > 50
-          ? `${previewText.substring(0, 50)}...`
-          : previewText;
-      return `<span class="block min-w-0 truncate">${escapeHtml(clippedText)}</span>`;
+      const clippedText = previewText.length > 60 ? `${previewText.substring(0, 60)}…` : previewText;
+      return `<span style="display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.8125rem">${escapeHtml(clippedText)}</span>`;
     };
 
     const rowsHtml = sanitizedRecords
@@ -2606,18 +2714,20 @@ collections.get("/:collection/records", async (c) => {
               const fullId = String(val);
               let shortId;
               if (fullId.includes("-")) {
-                shortId = fullId.split("-")[0] + "...";
-              } else if (fullId.length > 6) {
-                shortId = fullId.substring(0, 6) + "...";
+                shortId = fullId.split("-")[0] + "…";
+              } else if (fullId.length > 8) {
+                shortId = fullId.substring(0, 8) + "…";
               } else {
                 shortId = fullId;
               }
-              return `<td class="px-6 py-4 whitespace-nowrap text-foreground max-w-[18rem] overflow-hidden">
+              return `<td class="px-4 py-3 whitespace-nowrap">
                 <button
                   type="button"
-                  class="block w-full min-w-0 text-left font-mono cursor-copy"
-                  title="Click to copy ID"
+                  title="${fullId} — click to copy"
                   onclick='copyCollectionId(event, ${JSON.stringify(fullId)})'
+                  style="display:inline-flex;align-items:center;gap:4px;font-family:monospace;font-size:0.7rem;font-weight:500;padding:2px 7px;border-radius:5px;border:1px solid hsl(var(--border));background:hsl(var(--muted));color:hsl(var(--muted-foreground));cursor:copy;transition:background 0.1s,color 0.1s;white-space:nowrap;"
+                  onmouseenter="this.style.background='hsl(var(--primary)/0.08)';this.style.color='hsl(var(--primary))';this.style.borderColor='hsl(var(--primary)/0.3)'"
+                  onmouseleave="this.style.background='hsl(var(--muted))';this.style.color='hsl(var(--muted-foreground))';this.style.borderColor='hsl(var(--border))'"
                 >${shortId}</button>
               </td>`;
             }
@@ -3074,14 +3184,31 @@ collections.get("/:collection/new-record", async (c) => {
           inputType = "number";
         else if (col.data_type === "boolean") inputType = "checkbox";
 
+        // Boolean → toggle switch
+        if (inputType === "checkbox") {
+          return `
+        <div>
+          <label class="block text-sm font-medium text-foreground mb-2">${col.column_name} <span class="text-xs text-muted-foreground/70">(boolean)</span></label>
+          <label class="inline-flex items-center gap-3 cursor-pointer">
+            <span class="relative inline-flex h-6 w-11 items-center">
+              <input type="checkbox" name="${col.column_name}" value="true" class="peer sr-only" />
+              <span class="absolute inset-0 rounded-full bg-muted transition-colors peer-checked:bg-primary"></span>
+              <span class="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
+            </span>
+            <span class="text-sm text-muted-foreground">Enabled</span>
+          </label>
+        </div>
+      `;
+        }
+
         return `
         <div>
           <label class="block text-sm font-medium text-foreground mb-1">${col.column_name} <span class="text-xs text-muted-foreground/70">(${col.data_type})</span></label>
           ${
             inputType === "text" &&
             (col.data_type === "text" || col.data_type === "jsonb")
-              ? `<textarea name="${col.column_name}" rows="3" class="w-full flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"></textarea>`
-              : `<input type="${inputType}" name="${col.column_name}" ${inputType === "checkbox" ? 'value="true"' : ""} class="w-full flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">`
+              ? `<textarea name="${col.column_name}" rows="3" class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"></textarea>`
+              : `<input type="${inputType}" name="${col.column_name}" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">`
           }
         </div>
       `;
@@ -3092,7 +3219,10 @@ collections.get("/:collection/new-record", async (c) => {
       <div data-drawer-backdrop class="fixed inset-0 z-50 bg-black/50 flex justify-end transition-opacity" onclick="if(event.target===this) window.closeDrawer()">
         <div data-drawer-panel class="w-full max-w-md bg-background shadow-xl h-full flex flex-col border-l border-border transform translate-x-0" onclick="event.stopPropagation()">
           <div class="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
-            <h2 class="text-xl font-bold text-foreground">New Record: <span class="capitalize text-primary">${collectionName}</span></h2>
+            <div>
+              <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">${collectionName}</p>
+              <h2 class="text-base font-semibold text-foreground mt-0.5">New Record</h2>
+            </div>
             <button type="button" onclick="window.closeDrawer()" class="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground">
               <svg class="w-5 h-5 block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -3209,10 +3339,14 @@ collections.get("/:collection/records/:id/edit", async (c) => {
       formatDateTimeForInput(value, configuredTimeZone);
 
     const renderBooleanSelect = (name: string, checked: boolean) => `
-      <select name="${name}" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-        <option value="true" ${checked ? "selected" : ""}>Yes</option>
-        <option value="false" ${!checked ? "selected" : ""}>No</option>
-      </select>
+      <label class="inline-flex items-center gap-3 cursor-pointer">
+        <span class="relative inline-flex h-6 w-11 items-center">
+          <input type="checkbox" name="${name}" value="true" ${checked ? "checked" : ""} class="peer sr-only" />
+          <span class="absolute inset-0 rounded-full bg-muted transition-colors peer-checked:bg-primary"></span>
+          <span class="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5"></span>
+        </span>
+        <span class="text-sm text-muted-foreground">${checked ? "Enabled" : "Disabled"}</span>
+      </label>
     `;
 
     const editFieldSnapshotEntries: [string, string][] = [];
@@ -3447,7 +3581,10 @@ collections.get("/:collection/records/:id/edit", async (c) => {
       <div data-drawer-backdrop class="fixed inset-0 z-50 bg-black/50 flex justify-end transition-opacity" onclick="if(event.target===this) window.closeDrawer()">
         <div data-drawer-panel class="w-full max-w-md bg-background shadow-xl h-full flex flex-col border-l border-border transform translate-x-0" onclick="event.stopPropagation()">
           <div class="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
-            <h2 class="text-lg text-foreground">Edit <span class="font-semibold">${collectionName}</span> record</h2>
+            <div>
+              <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">${collectionName}</p>
+              <h2 class="text-base font-semibold text-foreground mt-0.5">Edit Record</h2>
+            </div>
             <button type="button" onclick="window.closeDrawer()" class="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground">
               <svg class="w-5 h-5 block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -4559,7 +4696,10 @@ collections.get("/:collection/settings", async (c) => {
       <div data-drawer-backdrop class="fixed inset-0 z-50 bg-black/50 flex justify-end transition-opacity" onclick="if(event.target===this) window.closeDrawer()">
         <div data-drawer-panel class="w-full max-w-2xl bg-background shadow-xl h-full flex flex-col border-l border-border transform translate-x-0" onclick="event.stopPropagation()">
           <div class="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
-            <h2 class="text-xl font-bold text-foreground">Edit Collection</h2>
+            <div>
+              <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">${collectionName}</p>
+              <h2 class="text-base font-semibold text-foreground mt-0.5">Edit Collection</h2>
+            </div>
             <button type="button" onclick="window.closeDrawer()" class="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground">
               <svg class="w-5 h-5 block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>

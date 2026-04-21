@@ -3,121 +3,297 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Grescale - Initial Setup</title>
+    <title>Grescale — Initial Setup</title>
+
+    <script>
+      (function () {
+        try {
+          var s = localStorage.getItem("grescale-theme");
+          var d = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          if (s === "dark" || (!s && d)) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
+
     <script src="https://unpkg.com/htmx.org@1.9.11"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script>
       document.addEventListener("DOMContentLoaded", () => lucide.createIcons());
+      tailwind.config = { darkMode: "class" };
     </script>
+
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+      :root {
+        --bg:       #f4f5f7;
+        --card:     #ffffff;
+        --border:   #e2e5ea;
+        --text:     #1a1d2b;
+        --muted:    #6b7080;
+        --primary:  #4f46e5;
+        --pf:       #ffffff;
+        --input-bg: #ffffff;
+        --input-bd: #d1d5db;
+        --ring:     rgba(79,70,229,0.35);
+        --success-bg: #f0fdf4; --success-bd: #86efac; --success-fg: #15803d;
+        --error-bg:   #fef2f2; --error-bd:   #fecaca; --error-fg:   #b91c1c;
+      }
+      .dark {
+        --bg:       #0e0f17;
+        --card:     #161824;
+        --border:   #2a2d3e;
+        --text:     #e8eaf2;
+        --muted:    #6b7280;
+        --primary:  #6366f1;
+        --pf:       #ffffff;
+        --input-bg: #1d1f2e;
+        --input-bd: #2a2d3e;
+        --ring:     rgba(99,102,241,0.4);
+        --success-bg: #052e16; --success-bd: #166534; --success-fg: #4ade80;
+        --error-bg:   #2d1515; --error-bd:   #7f1d1d; --error-fg:   #f87171;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+
+      body {
+        margin: 0; min-height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        background: var(--bg); color: var(--text);
+        padding: 1rem; position: relative; overflow: hidden;
+      }
+
+      body::before {
+        content: ""; position: fixed; inset: 0;
+        background-image:
+          linear-gradient(var(--border) 1px, transparent 1px),
+          linear-gradient(90deg, var(--border) 1px, transparent 1px);
+        background-size: 40px 40px; opacity: 0.4;
+        pointer-events: none; z-index: 0;
+      }
+      body::after {
+        content: ""; position: fixed; top: -30%; left: 50%;
+        transform: translateX(-50%); width: 600px; height: 400px;
+        background: radial-gradient(ellipse, rgba(79,70,229,0.12) 0%, transparent 70%);
+        pointer-events: none; z-index: 0;
+      }
+
+      .container {
+        position: relative; z-index: 1;
+        width: 100%; max-width: 420px;
+        display: flex; flex-direction: column; gap: 1.5rem;
+        animation: enterUp 0.4s cubic-bezier(0.16,1,0.3,1) both;
+      }
+
+      @keyframes enterUp {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
+      .brand {
+        display: flex; flex-direction: column; align-items: center; gap: 0.75rem; text-align: center;
+      }
+      .logo {
+        width: 48px; height: 48px; border-radius: 14px;
+        background: var(--primary); color: var(--pf);
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 700; font-size: 1.25rem;
+        box-shadow: 0 8px 24px rgba(79,70,229,0.35);
+      }
+      .brand-name { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; }
+      .brand-sub  { font-size: 0.813rem; color: var(--muted); margin-top: -0.25rem; }
+
+      .card {
+        background: var(--card); border: 1px solid var(--border);
+        border-radius: 16px; padding: 1.75rem 2rem;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+      }
+      .dark .card { box-shadow: 0 4px 24px rgba(0,0,0,0.3), 0 1px 4px rgba(0,0,0,0.2); }
+
+      .form-group { display: flex; flex-direction: column; gap: 0.375rem; margin-bottom: 1rem; }
+      .form-group:last-of-type { margin-bottom: 0; }
+
+      label { font-size: 0.8125rem; font-weight: 500; }
+
+      label .hint {
+        display: block; font-size: 0.75rem; font-weight: 400;
+        color: var(--muted); margin-top: 1px;
+      }
+
+      input[type="email"],
+      input[type="password"],
+      input[type="text"] {
+        width: 100%; height: 40px; padding: 0 0.75rem;
+        border-radius: 8px; border: 1px solid var(--input-bd);
+        background: var(--input-bg); color: var(--text);
+        font-size: 0.875rem; font-family: inherit; outline: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+      }
+      input:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+      input::placeholder { color: var(--muted); }
+
+      .hint-text {
+        font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem;
+      }
+      .hint-text code {
+        font-size: inherit; background: var(--border);
+        border-radius: 3px; padding: 0 3px;
+      }
+
+      .submit-btn {
+        width: 100%; height: 40px; margin-top: 1.25rem;
+        border-radius: 8px; border: none;
+        background: var(--primary); color: var(--pf);
+        font-size: 0.875rem; font-weight: 600; font-family: inherit;
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+        transition: opacity 0.15s, transform 0.1s;
+      }
+      .submit-btn:hover  { opacity: 0.9; }
+      .submit-btn:active { transform: scale(0.99); }
+
+      #setup-error:empty { display: none; }
+      .msg {
+        padding: 0.625rem 0.875rem; border-radius: 8px;
+        font-size: 0.8125rem; margin-top: 0.75rem;
+      }
+      .msg-error   { background: var(--error-bg);   border: 1px solid var(--error-bd);   color: var(--error-fg); }
+      .msg-success { background: var(--success-bg); border: 1px solid var(--success-bd); color: var(--success-fg); }
+
+      .theme-btn {
+        position: fixed; top: 1rem; right: 1rem;
+        width: 36px; height: 36px; border-radius: 10px;
+        border: 1px solid var(--border); background: var(--card);
+        color: var(--muted); display: flex; align-items: center; justify-content: center;
+        cursor: pointer; z-index: 10; transition: color 0.15s;
+      }
+      .theme-btn:hover { color: var(--text); }
+
+      #global-loader {
+        position: fixed; inset: 0; z-index: 9999;
+        background: rgba(0,0,0,0.25); backdrop-filter: blur(3px);
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0; pointer-events: none; transition: opacity 0.2s;
+      }
+      .spinner {
+        width: 36px; height: 36px; border-radius: 50%;
+        border: 2.5px solid var(--border); border-top-color: var(--primary);
+        animation: spin 0.7s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
   </head>
-  <body
-    class="bg-[linear-gradient(180deg,hsl(var(--background))_0%,hsl(var(--muted))_100%)] h-screen flex flex-col items-center justify-center font-sans text-foreground px-4"
-  >
-    <div
-      class="w-full max-w-md rounded-2xl border border-border bg-card shadow-sm p-8 space-y-6"
-    >
-      <div class="text-center">
-        <h1 class="text-3xl font-semibold tracking-tight mb-2">Welcome</h1>
-        <p class="text-sm text-muted-foreground">
-          Create the first admin account.
-        </p>
+
+  <body>
+    <button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">
+      <i data-lucide="sun" style="width:16px;height:16px;" class="dark:hidden"></i>
+      <i data-lucide="moon" style="width:16px;height:16px;" class="hidden dark:block"></i>
+    </button>
+
+    <div class="container">
+      <!-- Brand -->
+      <div class="brand">
+        <div class="logo">G</div>
+        <div>
+          <div class="brand-name">Grescale</div>
+          <div class="brand-sub">Create your first admin account</div>
+        </div>
       </div>
 
-      <div id="setup-error" class="empty:hidden"></div>
+      <!-- Card -->
+      <div class="card">
+        <div id="setup-error"></div>
 
-      <form
-        hx-post="/internal/api/auth/setup"
-        hx-target="#setup-error"
-        hx-swap="innerHTML"
-        class="space-y-4"
-      >
-        <div>
-          <label class="block text-sm font-medium mb-1 text-foreground/80"
-            >Admin Email</label
-          >
-          <input
-            type="email"
-            name="email"
-            required
-            class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1 text-foreground/80"
-            >Admin Password (min. 8 chars)</label
-          >
-          <input
-            type="password"
-            name="password"
-            minlength="8"
-            required
-            class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </div>
-        <div>
-          <label class="block text-sm font-medium mb-1 text-foreground/80"
-            >Setup Token</label
-          >
-          <input
-            type="password"
-            name="setup_token"
-            required
-            autocomplete="off"
-            class="flex h-10 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-          <p class="text-xs text-muted-foreground mt-1">
-            Printed in the server log at first boot, or set via the
-            <code>SETUP_TOKEN</code> environment variable.
-          </p>
-        </div>
-        <button
-          type="submit"
-          class="w-full inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring bg-primary text-primary-foreground shadow hover:bg-primary/90 h-10 px-4 py-2 mt-4"
+        <form
+          hx-post="/internal/api/auth/setup"
+          hx-target="#setup-error"
+          hx-swap="innerHTML"
         >
-          Create Admin
-        </button>
-      </form>
+          <div class="form-group">
+            <label for="setup-email">Admin Email</label>
+            <input
+              id="setup-email"
+              type="email"
+              name="email"
+              required
+              autocomplete="email"
+              placeholder="admin@example.com"
+            />
+          </div>
 
-      <script>
-        document.body.addEventListener("htmx:afterRequest", function (evt) {
-          if (evt.detail.successful && evt.detail.xhr.status === 200) {
-            const res = JSON.parse(evt.detail.xhr.response);
+          <div class="form-group">
+            <label for="setup-password">
+              Password
+              <span class="hint">Minimum 8 characters</span>
+            </label>
+            <input
+              id="setup-password"
+              type="password"
+              name="password"
+              minlength="8"
+              required
+              autocomplete="new-password"
+              placeholder="••••••••"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="setup-token">Setup Token</label>
+            <input
+              id="setup-token"
+              type="password"
+              name="setup_token"
+              required
+              autocomplete="off"
+              placeholder="••••••••••••"
+            />
+            <p class="hint-text">
+              Printed in the server log at first boot, or set via the
+              <code>SETUP_TOKEN</code> environment variable.
+            </p>
+          </div>
+
+          <button type="submit" class="submit-btn">
+            Create Admin Account
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div id="global-loader"><div class="spinner"></div></div>
+
+    <script>
+      function toggleTheme() {
+        var isDark = document.documentElement.classList.toggle("dark");
+        try { localStorage.setItem("grescale-theme", isDark ? "dark" : "light"); } catch(e){}
+        lucide.createIcons();
+      }
+
+      document.body.addEventListener("htmx:afterRequest", function(evt) {
+        if (evt.detail.successful && evt.detail.xhr.status === 200) {
+          try {
+            var res = JSON.parse(evt.detail.xhr.response);
             if (res.success) {
               document.getElementById("setup-error").innerHTML =
-                '<div class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-center text-emerald-700">Admin created. Redirecting to login...</div>';
-              setTimeout(() => (window.location.href = "/login"), 1500);
+                '<div class="msg msg-success">Admin account created. Redirecting to login…</div>';
+              setTimeout(function() { window.location.href = "/login"; }, 1500);
             }
-          }
-        });
-      </script>
-    </div>
-
-    <!-- Global Async Request Loader -->
-    <div
-      id="global-loader"
-      class="fixed inset-0 z-[9999] bg-background/80 flex flex-col items-center justify-center backdrop-blur-sm transition-opacity duration-200"
-      style="opacity: 0; pointer-events: none"
-    >
-      <div
-        class="animate-spin rounded-full h-12 w-12 border-b-2 border-foreground border-t-transparent mx-auto"
-      ></div>
-      <div class="mt-4 text-sm font-medium text-foreground">Processing...</div>
-    </div>
-    <script>
-      document.body.addEventListener("htmx:send", function () {
-        const loader = document.getElementById("global-loader");
-        if (loader) {
-          loader.style.opacity = "1";
-          loader.style.pointerEvents = "auto";
+          } catch(e) {}
         }
       });
-      document.body.addEventListener("htmx:afterRequest", function () {
-        const loader = document.getElementById("global-loader");
-        if (loader) {
-          loader.style.opacity = "0";
-          loader.style.pointerEvents = "none";
-        }
+
+      document.body.addEventListener("htmx:send", function() {
+        var l = document.getElementById("global-loader");
+        if (l) { l.style.opacity = "1"; l.style.pointerEvents = "auto"; }
+      });
+      document.body.addEventListener("htmx:afterRequest", function() {
+        var l = document.getElementById("global-loader");
+        if (l) { l.style.opacity = "0"; l.style.pointerEvents = "none"; }
       });
     </script>
   </body>
