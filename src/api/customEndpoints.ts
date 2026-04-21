@@ -5,6 +5,7 @@ import {
   readCustomEndpointFile,
   writeCustomEndpointFile,
   isCustomEndpointsEnabled,
+  getRegisteredEndpointPaths,
 } from "../services/customScriptsBackend.ts";
 
 export const customEndpoints = new Hono();
@@ -269,6 +270,12 @@ async function renderPage(
     </div>
   `;
 }
+
+/** Returns the live set of registered custom endpoint paths as JSON.
+ * Used by the admin rate-limiter autocomplete to add dynamic suggestions. */
+customEndpoints.get("/routes", (c) => {
+  return c.json(getRegisteredEndpointPaths());
+});
 
 customEndpoints.get("/", async (c) => {
   const basePath = getCustomEndpointsBasePath(c);

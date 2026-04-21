@@ -258,6 +258,11 @@ class InternalServerError extends HttpError {
 }
 
 let endpointHandlers: EndpointHandler[] = [];
+
+/** Returns a snapshot of all currently registered custom endpoint paths. */
+export function getRegisteredEndpointPaths(): { method: string; path: string }[] {
+  return endpointHandlers.map((e) => ({ method: e.method, path: e.path }));
+}
 let cronHandlers: CronHandler[] = [];
 let runtimeGeneration = 0;
 let reloadTimer: ReturnType<typeof setTimeout> | null = null;

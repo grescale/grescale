@@ -1972,13 +1972,156 @@ collections.get("/system-settings", async (c) => {
         const initialRlState = JSON.stringify({ enabled: rlEnabled.checked, rules: rlRules });
         const rlTargets = [{ value:'all',label:'All' },{ value:'guest',label:'Guest only' },{ value:'auth',label:'Auth only' }];
 
+        // ── Autocomplete suggestions ──────────────────────────────
+        const RL_SUGGESTIONS_BASE = [
+          '/api/collections/*/auth-with-password',
+          '/api/collections/*/auth-with-oauth2/*',
+          '/api/collections/*/auth-refresh',
+          '/api/collections/*/request-verification',
+          '/api/collections/*/confirm-verification',
+          '/api/collections/*/request-password-reset',
+          '/api/collections/*/confirm-password-reset',
+          '/api/collections/*/request-email-change',
+          '/api/collections/*/confirm-email-change',
+          '/api/collections/*/records',
+          '/api/collections/*/records/*',
+          '/api/collections/*',
+          '/api/*',
+          '/internal/api/auth/login',
+          '/internal/api/auth/setup',
+        ];
+        let RL_SUGGESTIONS = RL_SUGGESTIONS_BASE.slice();
+
+        // Fetch live custom endpoint paths and merge them (deduplicated)
+        fetch('/internal/api/custom-endpoints/routes')
+          .then(function(r) { return r.ok ? r.json() : []; })
+          .then(function(routes) {
+            if (!Array.isArray(routes)) return;
+            routes.forEach(function(r) {
+              if (r && r.path && !RL_SUGGESTIONS.includes(r.path)) {
+                RL_SUGGESTIONS.push(r.path);
+              }
+            });
+          })
+          .catch(function() { /* silently ignore — fallback to base list */ });
+
+        // Inject shared suggestion dropdown (singleton, repositioned per input)
+        let rlSuggestionBox = document.getElementById('rl-suggestion-box');
+        if (!rlSuggestionBox) {
+          rlSuggestionBox = document.createElement('div');
+          rlSuggestionBox.id = 'rl-suggestion-box';
+          rlSuggestionBox.style.cssText = [
+            'position:fixed;z-index:9999;min-width:320px;max-height:220px;overflow-y:auto',
+            'background:hsl(var(--popover));border:1px solid hsl(var(--border))',
+            'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);display:none',
+            'padding:4px 0'
+          ].join(';');
+          document.body.appendChild(rlSuggestionBox);
+        }
+        let _rlActiveInput = null;
+        document.addEventListener('mousedown', function(e) {
+          if (!rlSuggestionBox.contains(e.target) && e.target !== _rlActiveInput) {
+            rlSuggestionBox.style.display = 'none';
+          }
+        });
+
+        function showRlSuggestions(input, onSelect) {
+          _rlActiveInput = input;
+          const val = input.value.toLowerCase();
+          const filtered = RL_SUGGESTIONS.filter(function(s) {
+            return val === '' || s.toLowerCase().includes(val);
+          });
+          if (filtered.length === 0) { rlSuggestionBox.style.display = 'none'; return; }
+          rlSuggestionBox.innerHTML = '';
+          filtered.forEach(function(s) {
+            const item = document.createElement('div');
+            item.style.cssText = 'padding:6px 12px;cursor:pointer;font-size:0.78rem;font-family:monospace;color:hsl(var(--foreground));transition:background 0.1s';
+            item.onmouseenter = function() { item.style.background = 'hsl(var(--muted))'; };
+            item.onmouseleave = function() { item.style.background = ''; };
+            // Bold the matched segment
+            if (val) {
+              const idx = s.toLowerCase().indexOf(val);
+              if (idx !== -1) {
+                item.innerHTML = escapeHtml(s.slice(0, idx)) +
+                  '<strong style="color:hsl(var(--primary))">' + escapeHtml(s.slice(idx, idx + val.length)) + '</strong>' +
+                  escapeHtml(s.slice(idx + val.length));
+              } else { item.textContent = s; }
+            } else { item.textContent = s; }
+            item.onmousedown = function(e) {
+              e.preventDefault();
+              onSelect(s);
+              rlSuggestionBox.style.display = 'none';
+            };
+            rlSuggestionBox.appendChild(item);
+          });
+          // Position below or above — whichever has more room
+          const rect = input.getBoundingClientRect();
+          const spaceBelow = window.innerHeight - rect.bottom - 8;
+          const spaceAbove = rect.top - 8;
+          const maxH = 220;
+          if (spaceBelow >= Math.min(maxH, rlSuggestionBox.scrollHeight) || spaceBelow >= spaceAbove) {
+            // Open downward
+            rlSuggestionBox.style.top = (rect.bottom + 4) + 'px';
+            rlSuggestionBox.style.bottom = '';
+            rlSuggestionBox.style.maxHeight = Math.max(spaceBelow, 80) + 'px';
+          } else {
+            // Flip upward
+            rlSuggestionBox.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+            rlSuggestionBox.style.top = '';
+            rlSuggestionBox.style.maxHeight = Math.max(spaceAbove, 80) + 'px';
+          }
+          rlSuggestionBox.style.left = rect.left + 'px';
+          rlSuggestionBox.style.width = Math.max(rect.width, 320) + 'px';
+          rlSuggestionBox.style.display = 'block';
+        }
+        function escapeHtml(str) {
+          return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
         const renderRlRows = function() {
           rlRows.innerHTML = '';
           if (rlRules.length === 0) { rlRows.innerHTML = '<div class="p-3 text-xs text-muted-foreground">No rules configured.</div>'; }
           rlRules.forEach(function(rule, idx) {
             const row = document.createElement('div');
             row.className = 'grid grid-cols-[minmax(0,1fr)_110px_110px_130px_40px] gap-2 px-3 py-2 items-center';
-            const patternInput = document.createElement('input'); patternInput.type='text'; patternInput.value=rule.pattern||''; patternInput.placeholder='/api/*'; patternInput.className='h-9 rounded-md border border-border bg-background px-2 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'; patternInput.addEventListener('input',function(){ rule.pattern=patternInput.value; syncRl(); });
+
+            // ── Pattern input with autocomplete ──
+            const patternWrap = document.createElement('div');
+            patternWrap.style.position = 'relative';
+            const patternInput = document.createElement('input');
+            patternInput.type = 'text';
+            patternInput.value = rule.pattern || '';
+            patternInput.placeholder = '/api/*';
+            patternInput.autocomplete = 'off';
+            patternInput.spellcheck = false;
+            patternInput.className = 'h-9 w-full rounded-md border border-border bg-background px-2 text-sm font-mono focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+            patternInput.addEventListener('input', function() {
+              rule.pattern = patternInput.value;
+              syncRl();
+              showRlSuggestions(patternInput, function(selected) {
+                patternInput.value = selected;
+                rule.pattern = selected;
+                syncRl();
+              });
+            });
+            patternInput.addEventListener('focus', function() {
+              showRlSuggestions(patternInput, function(selected) {
+                patternInput.value = selected;
+                rule.pattern = selected;
+                syncRl();
+              });
+            });
+            patternInput.addEventListener('keydown', function(e) {
+              if (e.key === 'Escape') { rlSuggestionBox.style.display = 'none'; }
+              if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const items = rlSuggestionBox.querySelectorAll('div');
+                if (items.length) { items[0].focus(); }
+              }
+            });
+            patternWrap.appendChild(patternInput);
+            row.appendChild(patternWrap);
+
             const maxInput = document.createElement('input'); maxInput.type='number'; maxInput.min='1'; maxInput.value=String(rule.maxRequests||10); maxInput.className='h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'; maxInput.addEventListener('input',function(){ rule.maxRequests=parseInt(maxInput.value,10)||1; syncRl(); });
             const intervalInput = document.createElement('input'); intervalInput.type='number'; intervalInput.min='1'; intervalInput.value=String(rule.intervalSeconds||60); intervalInput.className='h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'; intervalInput.addEventListener('input',function(){ rule.intervalSeconds=parseInt(intervalInput.value,10)||1; syncRl(); });
             const targetSelect = document.createElement('select'); targetSelect.className='h-9 rounded-md border border-border bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
@@ -1986,7 +2129,7 @@ collections.get("/system-settings", async (c) => {
             targetSelect.addEventListener('change',function(){ rule.targetedUsers=targetSelect.value; syncRl(); });
             const removeBtn = document.createElement('button'); removeBtn.type='button'; removeBtn.className='inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground'; removeBtn.textContent='\u00D7'; removeBtn.title='Remove';
             removeBtn.addEventListener('click',function(){ rlRules.splice(idx,1); renderRlRows(); syncRl(); });
-            row.appendChild(patternInput); row.appendChild(maxInput); row.appendChild(intervalInput); row.appendChild(targetSelect); row.appendChild(removeBtn);
+            row.appendChild(maxInput); row.appendChild(intervalInput); row.appendChild(targetSelect); row.appendChild(removeBtn);
             rlRows.appendChild(row);
           });
         };
