@@ -7,6 +7,8 @@ It is heavily inspired by [PocketBase](https://github.com/pocketbase/pocketbase)
 
 Most of this repository was created through vibe coding, with roughly **85%** generated that way and the remaining **15%** written by hand to fix bugs, tighten behavior, and clean up rough edges. It is a real project, but it is still very much an **experimental** one.
 
+Over time, the plan is to slowly transfer everything to **100% human-coded** work so the project becomes more deliberate, maintainable, and easier to reason about.
+
 ## Why it exists
 
 I use this for one of my personal projects, and I built it to suit my own workflow and constraints. That said, there is nothing preventing other people from using it for their own projects as well if it fits their needs.
