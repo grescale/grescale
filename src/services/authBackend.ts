@@ -4,6 +4,9 @@ import { setCookie, deleteCookie } from "hono/cookie";
 import { getRequiredJwtSecret } from "../security.ts";
 import { timingSafeEqual } from "crypto";
 
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=65536,t=2,p=1$xuhqMAfR86mzzUehilH88BI9eQt2cfTFVtFaLNGxHKU$lN3OOwzqQOEumsiPVBkiVsXHiHSrN4Si57ZREAOEbKk";
+
 function constantTimeEquals(a: string, b: string) {
   const aBuf = Buffer.from(a);
   const bBuf = Buffer.from(b);
@@ -66,6 +69,7 @@ export async function handleLoginRequest(c: any) {
     const users =
       await sql`SELECT id, email, password FROM _users WHERE email = ${email} LIMIT 1`;
     if (users.length === 0) {
+      await Bun.password.verify(password, DUMMY_PASSWORD_HASH);
       return c.html(
         `<div class="text-destructive text-sm mt-2 font-medium">Invalid credentials.</div>`,
       );

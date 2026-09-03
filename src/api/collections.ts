@@ -32,6 +32,7 @@ import {
   setCustomEndpointsEnabled,
   isCustomEndpointsEnabled,
   loadCustomScripts,
+  reloadCustomScripts,
 } from "../services/customScriptsBackend.ts";
 
 export const collections = new Hono();
@@ -749,10 +750,15 @@ collections.get("/new", async (c) => {
                 </select>
               </div>
             </div>
-          <div>
-            <label class="block text-sm font-medium text-foreground mb-1">passwordConfirm</label>
-            <input type="password" name="passwordConfirm" class="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" required>
-          </div>
+          </div>\`;
+          container.insertAdjacentHTML('beforeend', html);
+
+          const el = document.getElementById(id);
+          const typeSelect = el.querySelector('.field-type');
+          const textSettings = el.querySelector('.field-text-settings');
+          const numSettings = el.querySelector('.field-number-settings');
+          const relationSettings = el.querySelector('.field-relation-settings');
+          const nonZeroWrapper = el.querySelector('.field-nonzero-wrapper');
           const dateSettings = el.querySelector('.field-date-settings');
           const trimWrapper = el.querySelector('.field-trim-wrapper');
 
@@ -1097,16 +1103,7 @@ collections.post("/", async (c) => {
       process.env.NODE_ENV === "production"
         ? "Internal server error"
         : err.message;
-    c.header(
-      "HX-Trigger",
-      JSON.stringify({
-        "show-toast": {
-          message: `Error creating collection: ${errMsg}`,
-          type: "error",
-        },
-      }),
-    );
-    return c.json({ error: errMsg }, 422);
+    return c.json({ error: `Error creating collection: ${errMsg}` }, 422);
   }
 });
 
@@ -1393,6 +1390,13 @@ collections.get("/sql-explorer", (c) => {
 collections.post("/sql-explorer", async (c) => {
   const body = await c.req.parseBody();
   const query = body.query as string;
+  const escapeHtml = (value: string) =>
+    value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
 
   if (!query || query.trim() === "") {
     return c.html(
@@ -1439,7 +1443,7 @@ collections.post("/sql-explorer", async (c) => {
       <table class="min-w-full divide-y divide-border text-sm">
         <thead class="bg-muted/50 text-left text-foreground font-medium">
           <tr>
-            ${columns.map((col) => `<th class="px-4 py-3 tracking-wider text-sm whitespace-nowrap">${col}</th>`).join("")}
+            ${columns.map((col) => `<th class="px-4 py-3 tracking-wider text-sm whitespace-nowrap">${escapeHtml(col)}</th>`).join("")}
           </tr>
         </thead>
         <tbody class="divide-y divide-border font-mono text-xs">
@@ -1473,7 +1477,7 @@ collections.post("/sql-explorer", async (c) => {
                     displayVal =
                       '<span class="text-muted-foreground/70 italic">null</span>';
                   } else if (typeof val === "object") {
-                    displayVal = JSON.stringify(val);
+                    displayVal = escapeHtml(JSON.stringify(val));
                   } else {
                     const strVal = String(val);
                     // Check if it's a datetime field
@@ -1501,22 +1505,25 @@ collections.post("/sql-explorer", async (c) => {
                             timeStr +
                             "</span></div>";
                         } else {
-                          displayVal =
+                          displayVal = escapeHtml(
                             strVal.length > 50
                               ? strVal.substring(0, 50) + "..."
-                              : strVal;
+                              : strVal,
+                          );
                         }
                       } catch (e) {
-                        displayVal =
+                        displayVal = escapeHtml(
                           strVal.length > 50
                             ? strVal.substring(0, 50) + "..."
-                            : strVal;
+                            : strVal,
+                        );
                       }
                     } else {
-                      displayVal =
+                      displayVal = escapeHtml(
                         strVal.length > 50
                           ? strVal.substring(0, 50) + "..."
-                          : strVal;
+                          : strVal,
+                      );
                     }
                   }
                   return `<td class="px-4 py-3 text-foreground max-w-sm truncate" title="${String(val).replace(/"/g, "&quot;")}">${displayVal}</td>`;
@@ -2168,13 +2175,16 @@ collections.post("/system-settings/custom-endpoints", async (c) => {
     // Apply the change to the runtime flag immediately.
     setCustomEndpointsEnabled(enabled);
 
-    // If enabling, make sure scripts are loaded.
-    if (enabled) {
-      try {
+    // If enabling, make sure scripts are loaded; if disabling, clear the
+    // runtime so handlers and crons stop immediately.
+    try {
+      if (enabled) {
         await loadCustomScripts();
-      } catch (e) {
-        console.error("[custom-endpoints] Script load error after enable:", e);
+      } else {
+        await reloadCustomScripts();
       }
+    } catch (e) {
+      console.error("[custom-endpoints] Script load error after toggle:", e);
     }
 
     return c.html(`
@@ -4243,7 +4253,7 @@ collections.post("/:collection/records/:id", async (c) => {
       const escapeSqlLiteral = (value: any) => {
         if (value === null || value === undefined) return "NULL";
         if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
-        return `'${String(value).replace(/'/g, "''")}'`;
+        return `'${String(value).replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
       };
 
       const assignments: string[] = [];
@@ -4627,11 +4637,11 @@ collections.post("/:collection/records/:id", async (c) => {
         return String(value);
       if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
       if (value instanceof Date)
-        return `'${value.toISOString().replace(/'/g, "''")}'`;
+        return `'${value.toISOString().replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
       if (typeof value === "object") {
-        return `'${JSON.stringify(value).replace(/'/g, "''")}'::jsonb`;
+        return `'${JSON.stringify(value).replace(/\\/g, "\\\\").replace(/'/g, "''")}'::jsonb`;
       }
-      return `'${String(value).replace(/'/g, "''")}'`;
+      return `'${String(value).replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
     };
 
     const updateAssignments = finalKeys
@@ -5703,6 +5713,8 @@ collections.post("/:collection/settings", async (c) => {
       // Compute added and renamed fields
       for (let ns of newSchema) {
         if (ns.system) continue;
+        if (!ns.name || !/^[a-zA-Z0-9_]+$/.test(ns.name))
+          throw new Error(`Invalid field name: ${ns.name}`);
         if (ns.isNew) {
           let safeType = "TEXT";
           switch (ns.type) {
@@ -5769,6 +5781,10 @@ collections.post("/:collection/settings", async (c) => {
             .map((f: string) => f.trim().toLowerCase().replace(/\s+/g, "_"))
             .filter(Boolean);
           if (columns.length === 0) continue;
+          for (const col of columns) {
+            if (!/^[a-zA-Z0-9_]+$/.test(col))
+              throw new Error(`Invalid index column name: ${col}`);
+          }
           const indexName = `idx_${collectionName}_${columns.join("_")}`;
 
           if (idx.type === "unique") {

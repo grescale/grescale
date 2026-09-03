@@ -338,7 +338,7 @@ export function assertReadOnlySqlQuery(query: string) {
 
   if (
     !/^(select\b|with\b|explain\b|show\b)/i.test(normalized) ||
-    /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|do|execute|set|reset|vacuum|analyze)\b/i.test(
+    /\b(insert|into|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|do|execute|set|reset|vacuum|analyze)\b/i.test(
       normalized,
     )
   ) {

@@ -177,7 +177,7 @@ export async function initializeDatabase() {
       INSERT INTO _settings (key, value)
       VALUES (
         'rate_limiting',
-        '{"enabled": false, "rules": [
+        '{"enabled": true, "rules": [
           {"label": "Admin login", "pattern": "/internal/api/auth/login", "maxRequests": 10, "intervalSeconds": 900, "targetedUsers": "all"},
           {"label": "Admin setup", "pattern": "/internal/api/auth/setup", "maxRequests": 5, "intervalSeconds": 600, "targetedUsers": "all"},
           {"label": "Public auth-with-password", "pattern": "/api/collections/*/auth-with-password", "maxRequests": 20, "intervalSeconds": 900, "targetedUsers": "all"}

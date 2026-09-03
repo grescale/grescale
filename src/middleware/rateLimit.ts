@@ -1,5 +1,8 @@
 import type { MiddlewareHandler } from "hono";
+import { getConnInfo } from "hono/bun";
+import { verify } from "hono/jwt";
 import sql from "../db/db.ts";
+import { getRequiredJwtSecret } from "../security.ts";
 
 export type RateLimitTarget = "all" | "guest" | "auth";
 
@@ -16,7 +19,25 @@ export interface RateLimitConfig {
   rules: RateLimitRule[];
 }
 
-const DEFAULT_CONFIG: RateLimitConfig = { enabled: false, rules: [] };
+const DEFAULT_CONFIG: RateLimitConfig = {
+  enabled: true,
+  rules: [
+    {
+      label: "Admin login",
+      pattern: "/internal/api/auth/login",
+      maxRequests: 10,
+      intervalSeconds: 60,
+      targetedUsers: "guest",
+    },
+    {
+      label: "Public auth-with-password",
+      pattern: "/api/collections/*/auth-with-password",
+      maxRequests: 10,
+      intervalSeconds: 60,
+      targetedUsers: "guest",
+    },
+  ],
+};
 
 type Bucket = { count: number; resetAt: number };
 
@@ -100,23 +121,37 @@ export function invalidateRateLimitCache() {
 }
 
 function clientIp(c: any): string {
-  const fwd = c.req.header("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  const real = c.req.header("x-real-ip");
-  if (real) return real.trim();
+  if (process.env.TRUST_PROXY === "true") {
+    const fwd = c.req.header("x-forwarded-for");
+    if (fwd) return fwd.split(",")[0]!.trim();
+    const real = c.req.header("x-real-ip");
+    if (real) return real.trim();
+  }
   try {
-    const addr = c.env?.incoming?.socket?.remoteAddress;
+    const addr = getConnInfo(c).remote.address;
     if (addr) return String(addr);
   } catch {}
   return "unknown";
 }
 
-function isAuthenticated(c: any): boolean {
-  const authHeader = c.req.header("authorization") || c.req.header("Authorization");
-  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) return true;
-  const cookieHeader = c.req.header("cookie") || c.req.header("Cookie") || "";
-  if (/(?:^|;\s*)admin_session=/.test(cookieHeader)) return true;
-  return false;
+async function isAuthenticated(c: any): Promise<boolean> {
+  try {
+    let token: string | null = null;
+    const authHeader =
+      c.req.header("authorization") || c.req.header("Authorization");
+    if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+      token = authHeader.slice(7);
+    } else {
+      const cookieHeader = c.req.header("cookie") || c.req.header("Cookie") || "";
+      const match = cookieHeader.match(/(?:^|;\s*)admin_session=([^;]+)/);
+      if (match) token = match[1];
+    }
+    if (!token) return false;
+    await verify(token, getRequiredJwtSecret(), "HS256");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function matchesTarget(target: RateLimitTarget, authed: boolean): boolean {
@@ -132,7 +167,7 @@ export const globalRateLimit: MiddlewareHandler = async (c, next) => {
   const path = new URL(c.req.url).pathname;
   const now = Date.now();
   const ip = clientIp(c);
-  const authed = isAuthenticated(c);
+  const authed = await isAuthenticated(c);
 
   let matchedAny = false;
   for (const rule of cfg.compiled) {

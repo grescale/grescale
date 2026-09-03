@@ -1225,6 +1225,8 @@ function createCronAdd(fileName: string) {
 }
 
 async function loadEndpointFile(fileName: string) {
+  if (!_customEndpointsEnabled) return;
+
   const filePath = path.join(customEndpointsDir, fileName);
   if (!existsSync(filePath)) return;
 

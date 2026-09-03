@@ -23,6 +23,9 @@ type PublicApiEnv = {
 
 const publicApi = new Hono<PublicApiEnv>();
 
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=65536,t=2,p=1$xuhqMAfR86mzzUehilH88BI9eQt2cfTFVtFaLNGxHKU$lN3OOwzqQOEumsiPVBkiVsXHiHSrN4Si57ZREAOEbKk";
+
 // User-writable system fields for auth collections. All other system
 // fields (verified, token_key, password_hash, created, updated, etc.)
 // are rejected to prevent mass-assignment privilege escalation.
@@ -71,6 +74,7 @@ publicApi.post("/collections/:collection/auth-with-password", async (c) => {
     `;
 
     if (users.length === 0) {
+      await Bun.password.verify(body.password, DUMMY_PASSWORD_HASH);
       return c.json({ error: "Invalid credentials" }, 401);
     }
 
