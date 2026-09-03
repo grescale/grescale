@@ -121,7 +121,10 @@ publicApi.post("/collections/:collection/auth-with-password", async (c) => {
   }
 });
 
-publicApi.use("/collections/:collection/records*", async (c, next) => {
+// Resolves the optional Bearer token into `auth_user`. Registered for both
+// the exact records path and its sub-paths: in hono a trailing "/*" only
+// matches deeper paths, and a bare "*" suffix without "/" matches nothing.
+const resolveRecordsAuth = async (c: any, next: any) => {
   const authHeader = c.req.header("Authorization");
   const routeCollection = c.req.param("collection");
   let user: any = null;
@@ -155,7 +158,10 @@ publicApi.use("/collections/:collection/records*", async (c, next) => {
 
   c.set("auth_user", user);
   await next();
-});
+};
+
+publicApi.use("/collections/:collection/records", resolveRecordsAuth);
+publicApi.use("/collections/:collection/records/*", resolveRecordsAuth);
 // Initiate Google OAuth2 flow
 publicApi.get("/collections/:collection/auth-with-oauth2/google", async (c) => {
   const collectionName = c.req.param("collection");

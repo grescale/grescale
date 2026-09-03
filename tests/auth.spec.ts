@@ -1,19 +1,54 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from "@playwright/test";
+import { ADMIN_EMAIL, ADMIN_PASSWORD, loginViaUi } from "./helpers";
 
-test.describe('Auth UI Tests', () => {
-  test('Redirects to login if not authenticated', async ({ page }) => {
-    await page.goto('http://127.0.0.1:8080/admin');
-    await expect(page).toHaveURL('http://127.0.0.1:8080/login');
+// These tests exercise the unauthenticated flows, so ignore the shared
+// admin session created by the setup project.
+test.use({ storageState: { cookies: [], origins: [] } });
+
+test.describe("Auth (SPA)", () => {
+  test("unauthenticated visitors are redirected to /login", async ({
+    page,
+  }) => {
+    await page.goto("/collections");
+    await expect(page).toHaveURL(/\/login/);
   });
 
-  test('Fails login with bad credentials and shows error', async ({ page }) => {
-    await page.goto('http://127.0.0.1:8080/login');
-    await page.fill('input[name="email"]', 'admin@grescale.local');
-    await page.fill('input[name="password"]', 'wrongpassword');
-    await page.click('button[type="submit"]');
+  test("root redirects to /login when not authenticated", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/login/);
+  });
 
-    // HTMX places the error in #login-error
-    const errorMsg = page.locator('#login-error');
-    await expect(errorMsg).toContainText('Invalid credentials');
+  test("login with bad credentials shows an error", async ({ page }) => {
+    await page.goto("/login");
+    await page.fill("#login-email", ADMIN_EMAIL);
+    await page.fill("#login-password", "definitely-wrong-password");
+    await page.getByRole("button", { name: "Sign in" }).click();
+
+    await expect(page.getByText("Invalid credentials.")).toBeVisible();
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  test("login with valid credentials lands on the collections shell", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+    await page.fill("#login-email", ADMIN_EMAIL);
+    await page.fill("#login-password", ADMIN_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+
+    await expect(page).toHaveURL(/\/collections/);
+    await expect(
+      page.getByRole("heading", { name: "Collections" }),
+    ).toBeVisible();
+  });
+
+  test("logout returns to the login page", async ({ page }) => {
+    await loginViaUi(page);
+    await page.getByRole("button", { name: "Sign out" }).click();
+    await expect(page).toHaveURL(/\/login/);
+
+    // The session cookie is gone: protected routes redirect again.
+    await page.goto("/collections");
+    await expect(page).toHaveURL(/\/login/);
   });
 });

@@ -36,6 +36,8 @@ playwright/.cache/
 # Build outputs & Logs
 dist/
 build/
+web/node_modules/
+web/dist/
 logs/
 *.log
 npm-debug.log*
@@ -48,3 +50,4 @@ bun.log
 # Temporary files
 tmp/
 temp/
+tests/.auth/

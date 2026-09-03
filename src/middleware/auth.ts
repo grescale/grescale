@@ -3,10 +3,16 @@ import { verify } from "hono/jwt";
 import { getRequiredJwtSecret } from "../security.ts";
 import sql from "../db/db.ts";
 
+export function hasSameOriginHeader(c: any): boolean {
+  return (
+    c.req.header("X-Requested-With") === "XMLHttpRequest" ||
+    c.req.header("x-requested-with") === "XMLHttpRequest"
+  );
+}
+
 export const requireAuth = async (c: any, next: any) => {
   const isApiRequest = c.req.path.startsWith("/api/");
   const isInternalApiRequest = c.req.path.startsWith("/internal/api/");
-  const isAdminRequest = c.req.path.startsWith("/admin/");
   let token: string | null = null;
 
   if (isApiRequest) {
@@ -26,41 +32,16 @@ export const requireAuth = async (c: any, next: any) => {
       );
     }
   } else if (isInternalApiRequest) {
-    const isHtmxRequest =
-      c.req.header("HX-Request") === "true" ||
-      c.req.header("hx-request") === "true";
-
-    if (!isHtmxRequest) {
+    if (!hasSameOriginHeader(c)) {
       return c.notFound();
     }
 
-    // Internal admin routes: use the admin session cookie, but only when the request
-    // originates from the admin UI (HTMX adds the request header automatically).
+    // Internal admin routes: use the admin session cookie, but only when the
+    // request originates from the admin SPA (it sends the header automatically).
     token = getCookie(c, "admin_session") || null;
 
     if (!token) {
-      return c.html(
-        `<span class="text-red-500">Unauthorized: Please log in first.</span>`,
-        401,
-      );
-    }
-  } else if (isAdminRequest) {
-    // /admin routes: require HTMX request + cookie (for admin UI only)
-    const isHtmxRequest =
-      c.req.header("HX-Request") === "true" ||
-      c.req.header("hx-request") === "true";
-
-    if (!isHtmxRequest) {
-      return c.notFound();
-    }
-
-    token = getCookie(c, "admin_session") || null;
-
-    if (!token) {
-      return c.html(
-        `<span class="text-red-500">Unauthorized: Please log in first.</span>`,
-        401,
-      );
+      return c.json({ error: "Unauthorized: Please log in first." }, 401);
     }
   } else {
     // Other routes shouldn't use this middleware
@@ -73,19 +54,13 @@ export const requireAuth = async (c: any, next: any) => {
 
     // Throw forbidden if not superadmin
     if (payload.type !== "admin") {
-      if (isApiRequest) {
-        return c.json(
-          {
-            code: 403,
-            message:
-              "The request requires valid admin authorization token to be set.",
-            data: {},
-          },
-          403,
-        );
-      }
-      return c.html(
-        `<span class="text-red-500">Forbidden: Superadmin access required.</span>`,
+      return c.json(
+        {
+          code: 403,
+          message:
+            "The request requires valid admin authorization token to be set.",
+          data: {},
+        },
         403,
       );
     }
@@ -115,9 +90,6 @@ export const requireAuth = async (c: any, next: any) => {
         401,
       );
     }
-    return c.html(
-      `<span class="text-red-500">Unauthorized: Invalid or expired session.</span>`,
-      401,
-    );
+    return c.json({ error: "Unauthorized: Invalid or expired session." }, 401);
   }
 };

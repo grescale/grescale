@@ -19,10 +19,9 @@ const { upgradeWebSocket, websocket } = createBunWebSocket();
 
 import sql from "./db/db.ts";
 import authRoutes from "./api/auth.ts";
-import customEndpointsRoutes from "./api/customEndpoints.ts";
-import collectionRoutes from "./api/collections.ts";
+import adminApiRoutes from "./api/adminApi.ts";
+import adminDownloadsRoutes from "./api/adminDownloads.ts";
 import publicApiRoutes from "./api/public.ts";
-import adminRoutes from "./api/adminRoutes.ts";
 import { requireAuth } from "./middleware/auth.ts";
 import { globalRateLimit } from "./middleware/rateLimit.ts";
 
@@ -146,12 +145,7 @@ app.use("*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
 
   // Serve static assets regardless
-  if (
-    path.startsWith("/assets/") ||
-    path.endsWith(".css") ||
-    path.endsWith(".js") ||
-    path.endsWith(".html")
-  ) {
+  if (path.startsWith("/assets/") || /\.[a-zA-Z0-9]{1,10}$/.test(path)) {
     return next();
   }
 
@@ -206,247 +200,6 @@ app.use("*", async (c, next) => {
   }
 
   return next();
-});
-
-app.get("/setup-db", (c) => {
-  const error = c.req.query("error");
-  const escapeHtml = (value: string) =>
-    value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  const errMsg = error
-    ? `<div class="msg msg-error">${escapeHtml(error)}</div>`
-    : "";
-  return c.html(`
-    <!doctype html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>Grescale — Database Setup</title>
-      <script>
-        (function () {
-          try {
-            var s = localStorage.getItem("grescale-theme");
-            var d = window.matchMedia("(prefers-color-scheme: dark)").matches;
-            if (s === "dark" || (!s && d)) document.documentElement.classList.add("dark");
-          } catch (e) {}
-        })();
-      </script>
-      <script src="https://unpkg.com/lucide@latest"></script>
-      <script>
-        document.addEventListener("DOMContentLoaded", () => lucide.createIcons());
-      </script>
-      <style>
-        @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
-
-        :root {
-          --bg: #f1f3f5;
-          --card: #ffffff;
-          --border: #e4e6eb;
-          --text: #18181b;
-          --muted: #71717a;
-          --primary: #4f46e5;
-          --pf: #ffffff;
-          --input-bg: #ffffff;
-          --input-bd: #d4d4d8;
-          --ring: rgba(79,70,229,0.35);
-          --error-bg: #fef2f2; --error-bd: #fecaca; --error-fg: #b91c1c;
-        }
-        .dark {
-          --bg: #121212;
-          --card: #18181b;
-          --border: #27272a;
-          --text: #f4f4f5;
-          --muted: #a1a1aa;
-          --primary: #6366f1;
-          --pf: #ffffff;
-          --input-bg: #18181b;
-          --input-bd: #3f3f46;
-          --ring: rgba(99,102,241,0.4);
-          --error-bg: #450a0a; --error-bd: #7f1d1d; --error-fg: #fca5a5;
-        }
-
-        *, *::before, *::after { box-sizing: border-box; }
-
-        body {
-          margin: 0; min-height: 100vh;
-          display: flex; align-items: center; justify-content: center;
-          font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
-          -webkit-font-smoothing: antialiased;
-          background: var(--bg); color: var(--text);
-          padding: 1rem; position: relative; overflow: hidden;
-        }
-
-        .container {
-          position: relative; z-index: 1;
-          width: 100%;
-          display: flex; flex-direction: column; gap: 1.75rem;
-          animation: enterUp 0.4s cubic-bezier(0.16,1,0.3,1) both;
-        }
-
-        @keyframes enterUp {
-          from { opacity: 0; transform: translateY(12px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-
-        .brand {
-          display: flex; flex-direction: column; align-items: center; gap: 0.75rem; text-align: center;
-        }
-        .logo {
-          width: 44px; height: 44px; border-radius: 8px;
-          background: var(--primary); color: var(--pf);
-          display: flex; align-items: center; justify-content: center;
-          font-weight: 700; font-size: 1.25rem;
-          box-shadow: 0 4px 14px rgba(79,70,229,0.25);
-        }
-        .brand-name { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.5px; }
-        .brand-sub  { font-size: 0.875rem; color: var(--muted); margin-top: -0.15rem; font-weight: 400; }
-
-        .card { margin: 0 auto; width: 420px; }
-
-        .form-group { display: flex; flex-direction: column; gap: 1.5rem; }
-        .form-group + .form-group { margin-top: 1.25rem; }
-
-        label {
-          display: block;
-          font-size: 0.75rem;
-          font-weight: 500;
-          color: var(--text);
-          padding: 8px 12px 2px 12px;
-        }
-
-        .inputWrapper {
-          width: 100%;
-          background: var(--input-bg);
-          border-radius: 6px;
-          overflow: hidden;
-          transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .inputWrapper:focus-within {
-          border-color: var(--primary);
-          box-shadow: 0 0 0 3px var(--ring);
-        }
-
-        input[type="text"],
-        input[type="password"] {
-          width: 100%;
-          padding: 2px 12px 8px 12px;
-          background: transparent;
-          color: var(--text);
-          font-size: 0.875rem;
-          font-family: inherit;
-          border: none;
-          outline: none;
-        }
-        input::placeholder { color: var(--muted); }
-
-        .hint-text {
-          font-size: 0.75rem; color: var(--muted); margin: 0.375rem 0 0; line-height: 1.4;
-        }
-        .hint-text code {
-          font-size: inherit; background: var(--border);
-          border-radius: 3px; padding: 1px 4px;
-        }
-
-        .submit-btn {
-          width: 100%; height: 44px; margin-top: 1.5rem;
-          border-radius: 6px; border: none;
-          background: var(--primary); color: var(--pf);
-          font-size: 0.875rem; font-weight: 500; font-family: inherit;
-          cursor: pointer; display: flex; align-items: center; justify-content: center;
-          gap: 0.5rem;
-          transition: filter 0.15s, transform 0.1s;
-        }
-        .submit-btn:hover  { filter: brightness(1.1); }
-        .submit-btn:active { transform: scale(0.99); }
-
-        .msg {
-          padding: 0.625rem 0.875rem; border-radius: 8px;
-          font-size: 0.8125rem; margin-bottom: 1rem;
-        }
-        .msg-error { background: var(--error-bg); border: 1px solid var(--error-bd); color: var(--error-fg); }
-
-        .theme-btn {
-          position: fixed; top: 1rem; right: 1rem;
-          width: 36px; height: 36px; border-radius: 10px;
-          border: 1px solid var(--border); background: var(--card);
-          color: var(--muted); display: flex; align-items: center; justify-content: center;
-          cursor: pointer; z-index: 10; transition: color 0.15s;
-        }
-        .theme-btn:hover { color: var(--text); }
-      </style>
-    </head>
-    <body>
-      <button class="theme-btn" onclick="toggleTheme()" title="Toggle theme">
-        <i data-lucide="sun" style="width:16px;height:16px;" class="dark:hidden"></i>
-        <i data-lucide="moon" style="width:16px;height:16px;display:none;" class="hidden dark:block"></i>
-      </button>
-
-      <div class="container">
-        <div class="brand">
-          <div class="logo">G</div>
-          <div>
-            <div class="brand-name">Grescale</div>
-            <div class="brand-sub">Connect to Postgres</div>
-          </div>
-        </div>
-
-        <div class="card">
-          ${errMsg}
-          <form method="POST" action="/setup-db">
-            <div class="form-group">
-              <div class="inputWrapper">
-                <label for="database_url">Database URL</label>
-                <input
-                  id="database_url"
-                  type="text"
-                  name="database_url"
-                  required
-                  placeholder="postgres://user:pass@localhost:5432/grescale"
-                />
-              </div>
-            </div>
-
-            <div class="form-group">
-              <div class="inputWrapper">
-                <label for="setup_token">Setup Token</label>
-                <input
-                  id="setup_token"
-                  type="password"
-                  name="setup_token"
-                  required
-                  autocomplete="off"
-                  placeholder="••••••••••••"
-                />
-              </div>
-              <p class="hint-text">
-                Printed in the server log at first boot, or set via the
-                <code>SETUP_TOKEN</code> environment variable.
-              </p>
-            </div>
-
-            <button type="submit" class="submit-btn">
-              <i data-lucide="database" style="width:16px;height:16px;"></i>
-              Connect &amp; Initialize
-            </button>
-          </form>
-        </div>
-      </div>
-
-      <script>
-        function toggleTheme() {
-          var isDark = document.documentElement.classList.toggle("dark");
-          try { localStorage.setItem("grescale-theme", isDark ? "dark" : "light"); } catch(e){}
-          lucide.createIcons();
-        }
-      </script>
-    </body>
-    </html>
-  `);
 });
 
 app.post("/setup-db", async (c) => {
@@ -600,19 +353,18 @@ if (process.env.DATABASE_URL) {
 // Mount modules
 app.route("/internal/api/auth", authRoutes);
 
-// Protect internal API routes with auth (requires Authorization header for /internal/api/)
-const apiCollectionsWrapper = new Hono();
-apiCollectionsWrapper.use("*", requireAuth);
-apiCollectionsWrapper.route("/", collectionRoutes);
-app.route("/internal/api/collections", apiCollectionsWrapper);
+// Cookie-only download routes for the admin SPA (backup + schema export).
+// Mounted BEFORE the gated admin API so plain browser navigations reach them;
+// the sub-app carries its own cookie auth and only registers these two paths.
+app.route("/internal/api/admin", adminDownloadsRoutes);
 
-const apiCustomEndpointsWrapper = new Hono();
-apiCustomEndpointsWrapper.use("*", requireAuth);
-apiCustomEndpointsWrapper.route("/", customEndpointsRoutes);
-app.route("/internal/api/custom-endpoints", apiCustomEndpointsWrapper);
+// JSON admin API for the Vue SPA (same cookie + same-origin header gate).
+const adminApiWrapper = new Hono();
+adminApiWrapper.use("*", requireAuth);
+adminApiWrapper.route("/", adminApiRoutes);
+app.route("/internal/api/admin", adminApiWrapper);
 
 app.route("/api", publicApiRoutes);
-app.route("/admin", adminRoutes);
 
 // WebSocket for Realtime Logs
 let logClients = new Set<any>();
@@ -637,26 +389,6 @@ app.get(
   }),
 );
 
-// Serve static files from the public directory
-app.use("/*", serveStatic({ root: "./public" }));
-
-// API route to get current time from DB
-app.get("/api/time", async (c) => {
-  try {
-    const result = await sql`SELECT NOW()`;
-    return c.html(
-      `<span class="text-green-600 font-bold">${result[0].now.toISOString()}</span>`,
-    );
-  } catch (error) {
-    console.error(error);
-    return c.html(
-      `<span class="text-red-500">Database connection failed</span>`,
-    );
-  }
-});
-
-// Example route returning HTML for HTMX
-
 async function ensureAdminSession(c: any) {
   try {
     const token = getCookie(c, "admin_session");
@@ -669,78 +401,38 @@ async function ensureAdminSession(c: any) {
   }
 }
 
-async function renderAdminShell(c: any) {
-  const isAdmin = await ensureAdminSession(c);
-  if (!isAdmin) return c.redirect("/login");
-  const html = await Bun.file("src/views/admin.html").text();
-  return c.html(html);
-}
-
-// Protected Admin Panel
-app.get("/admin", async (c) => {
-  return c.redirect("/collections");
-});
-
-app.get("/dashboard", async (c) => {
-  return await renderAdminShell(c);
-});
-
-// Deep-link routes for admin shell pages pushed by HTMX.
-app.get("/collections", async (c) => {
-  return await renderAdminShell(c);
-});
-
-app.get("/collections/:collection", async (c) => {
-  return await renderAdminShell(c);
-});
-
-app.get("/settings", async (c) => {
-  return await renderAdminShell(c);
-});
-
-app.get("/logs", async (c) => {
-  return await renderAdminShell(c);
-});
-
-app.get("/api-tester", async (c) => {
-  return await renderAdminShell(c);
-});
-
-app.get("/sql-explorer", async (c) => {
-  return await renderAdminShell(c);
-});
-
-app.get("/custom-endpoints", async (c) => {
-  return await renderAdminShell(c);
-});
-
-// Login Page
-app.get("/setup", async (c) => {
-  const html = await Bun.file("public/setup.html").text();
-  return c.html(html);
-});
-
-app.get("/login", async (c) => {
-  try {
-    const token = getCookie(c, "admin_session");
-    if (token) {
-      const payload = await verify(token, getRequiredJwtSecret(), "HS256");
-      if (payload.type === "admin") return c.redirect("/collections");
-    }
-  } catch {
-    // Invalid token, keep login page flow.
-  }
-  const html = await Bun.file("public/login.html").text();
-  return c.html(html);
-});
-
-// Redirect root
-app.get("/", (c) => {
-  return c.redirect("/login");
-});
-
 app.get("/health", (c) => {
   return c.json({ status: "OK" });
+});
+
+// --- Admin SPA serving (Vue app built into web/dist) -----------------------
+
+const SPA_DIST = "./web/dist";
+const SPA_INDEX = `${SPA_DIST}/index.html`;
+
+// Hashed build assets and any files copied from web/public (favicon, icons).
+// Misses fall through to the SPA fallback below.
+app.use("/*", serveStatic({ root: SPA_DIST }));
+
+// SPA fallback: any GET that is not an API endpoint serves the app's
+// index.html so client-side routes survive deep links and reloads.
+app.get("*", async (c) => {
+  const path = new URL(c.req.url).pathname;
+  if (
+    path.startsWith("/internal/") ||
+    path.startsWith("/api/") ||
+    path === "/admin" ||
+    path.startsWith("/admin/")
+  ) {
+    return c.notFound();
+  }
+  if (!existsSync(SPA_INDEX)) {
+    return c.text(
+      "Admin SPA not built yet. Run `npm --prefix web run build`, or use `npm --prefix web run dev` during development.",
+      503,
+    );
+  }
+  return c.html(await Bun.file(SPA_INDEX).text());
 });
 
 export default {

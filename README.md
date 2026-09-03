@@ -24,17 +24,30 @@ I use this for one of my personal projects, and I built it to suit my own workfl
 ## What it is
 
 - A PocketBase-style backend built on Postgres
-- Powered by Bun, Hono, and HTMX
+- Powered by Bun, Hono, and a Vue 3 admin SPA
 - Designed to stay lightweight and approachable
 - Meant to be practical for personal and small-scale projects
 
 ## Getting started
 
-The project uses Bun for development and testing.
+The project uses Bun for the backend and Vite for the admin SPA (in `web/`).
+
+Development (two processes — Bun backend on :8080, Vite dev server on :5173
+with API proxying to the backend):
 
 ```bash
 bun install
-bun run dev
+npm --prefix web install
+bun run dev        # terminal 1: backend
+bun run web:dev    # terminal 2: admin SPA at http://localhost:5173
+```
+
+Production (single process — the backend serves the built SPA from
+`web/dist`):
+
+```bash
+bun run web:build
+bun run start
 ```
 
 ## Testing
